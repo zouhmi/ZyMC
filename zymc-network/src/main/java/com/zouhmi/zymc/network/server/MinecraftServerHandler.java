@@ -1,6 +1,7 @@
 package com.zouhmi.zymc.network.server;
 
 import com.zouhmi.zymc.core.ZMCVersion;
+import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.Packet;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
@@ -8,6 +9,8 @@ import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
 import com.zouhmi.zymc.network.protocol.play.GameJoinS2C;
+import com.zouhmi.zymc.network.protocol.play.KeepAliveC2S;
+import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookC2S;
 import com.zouhmi.zymc.network.protocol.status.StatusRequestC2S;
 import com.zouhmi.zymc.network.protocol.status.StatusResponseS2C;
 import io.netty.channel.Channel;
@@ -16,21 +19,22 @@ import io.netty.channel.SimpleChannelInboundHandler;
 
 public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Packet<?>> {
 
-    private ConnectionState state = ConnectionState.HANDSHAKING;
+    private final ConnectionRegistry connectionRegistry;
     private final ServerCommandCenter commandCenter;
     private final Logger logger;
-    private final java.util.function.Consumer<HandshakeC2S> handshakeCallback;
-    private final java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler;
-    private final java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler;
+    private java.util.function.Consumer<HandshakeC2S> handshakeCallback;
+    private java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler;
+    private java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler;
 
-    public MinecraftServerHandler(ServerCommandCenter commandCenter, Logger logger) {
-        this(commandCenter, logger, null, null, null);
+    public MinecraftServerHandler(ConnectionRegistry connectionRegistry, ServerCommandCenter commandCenter, Logger logger) {
+        this(connectionRegistry, commandCenter, logger, null, null, null);
     }
 
-    public MinecraftServerHandler(ServerCommandCenter commandCenter, Logger logger,
+    public MinecraftServerHandler(ConnectionRegistry connectionRegistry, ServerCommandCenter commandCenter, Logger logger,
                                    java.util.function.Consumer<HandshakeC2S> handshakeCallback,
                                    java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler,
                                    java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler) {
+        this.connectionRegistry = connectionRegistry;
         this.commandCenter = commandCenter;
         this.logger = logger;
         this.handshakeCallback = handshakeCallback;
@@ -38,8 +42,17 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
         this.loginKeyHandler = loginKeyHandler;
     }
 
+    public void setLoginHelloHandler(java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> handler) {
+        this.loginHelloHandler = handler;
+    }
+
+    public void setLoginKeyHandler(java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> handler) {
+        this.loginKeyHandler = handler;
+    }
+
     @Override
     public void channelRead0(ChannelHandlerContext ctx, Packet<?> packet) throws Exception {
+        ConnectionState state = connectionRegistry.currentState();
         switch (state) {
             case HANDSHAKING -> {
                 if (packet instanceof HandshakeC2S handshake) {
@@ -59,7 +72,13 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
                 }
             }
             case PLAY -> {
-                // Play state packets from client are handled by the play state handler (not yet implemented)
+                if (packet instanceof KeepAliveC2S keepAlive) {
+                    logger.log("Keep-alive response: %d".formatted(keepAlive.id()));
+                } else if (packet instanceof PlayerPositionAndLookC2S pos) {
+                    logger.log("Player position update: x=%.2f y=%.2f z=%.2f".formatted(pos.x(), pos.y(), pos.z()));
+                } else {
+                    logger.log("Unhandled play packet: %s".formatted(packet.getClass().getSimpleName()));
+                }
             }
             default -> throw new IllegalStateException("Unknown connection state: " + state);
         }
@@ -99,8 +118,6 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
 
     private void handleLoginHello(ChannelHandlerContext ctx, LoginHelloC2S hello) {
         logger.log("Login hello from %s (profile %s)".formatted(hello.name(), hello.profileId()));
-        // The login hello handler is responsible for generating the RSA keypair and sending LoginHelloS2C.
-        // This is done by the loginHelloHandler callback (set by the server).
         if (loginHelloHandler != null) {
             loginHelloHandler.accept(ctx, hello);
         }
@@ -122,15 +139,14 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     }
 
     void setState(ConnectionState state) {
-        this.state = state;
+        connectionRegistry.setState(state);
     }
 
     public ConnectionState getState() {
-        return state;
+        return connectionRegistry.currentState();
     }
 
     void onChannelConnected(Channel channel) {
-        // future: track connection, assign connection id, etc.
     }
 
     public interface ServerCommandCenter {

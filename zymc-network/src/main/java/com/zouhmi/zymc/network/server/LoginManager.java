@@ -2,13 +2,17 @@ package com.zouhmi.zymc.network.server;
 
 import com.zouhmi.zymc.core.ZMCVersion;
 import com.zouhmi.zymc.network.crypto.RSAEngine;
+import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
-import com.zouhmi.zymc.network.protocol.PacketRegistry;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
+import com.zouhmi.zymc.network.protocol.play.GameEventS2C;
 import com.zouhmi.zymc.network.protocol.play.GameJoinS2C;
+import com.zouhmi.zymc.network.protocol.play.PlayerInfoUpdateS2C;
+import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookS2C;
+import com.zouhmi.zymc.network.protocol.play.SetCenterChunkS2C;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelHandlerContext;
 import java.nio.ByteBuffer;
@@ -18,16 +22,17 @@ import java.util.concurrent.ThreadLocalRandom;
 
 public final class LoginManager {
 
-    private final PacketRegistry registry;
+    private final ConnectionRegistry connectionRegistry;
     private final RSAEngine rsaEngine;
     private final MinecraftServerHandler handler;
     private final String serverId;
 
     private ChannelHandlerContext ctx;
     private LoginHelloC2S pendingHello;
+    private byte[] sentNonce;
 
-    public LoginManager(PacketRegistry registry, MinecraftServerHandler handler) {
-        this.registry = registry;
+    public LoginManager(ConnectionRegistry connectionRegistry, MinecraftServerHandler handler) {
+        this.connectionRegistry = connectionRegistry;
         this.handler = handler;
         this.rsaEngine = new RSAEngine();
         this.serverId = "";
@@ -39,12 +44,13 @@ public final class LoginManager {
 
         byte[] nonce = new byte[4];
         ThreadLocalRandom.current().nextBytes(nonce);
+        this.sentNonce = nonce;
 
         LoginHelloS2C response = new LoginHelloS2C(
                 serverId,
                 rsaEngine.encryptPublicKeyDer(),
                 nonce,
-                false); // offline mode, no Mojang auth
+                false);
 
         ctx.writeAndFlush(response);
     }
@@ -54,13 +60,11 @@ public final class LoginManager {
             byte[] decryptedSecret = rsaEngine.decryptWithPrivateKey(key.encryptedSecretKey());
             byte[] decryptedNonce = rsaEngine.decryptWithPrivateKey(key.nonce());
 
-            // Verify the nonce matches what we sent
             if (!matchesNonce(decryptedNonce)) {
                 ctx.close();
                 return;
             }
 
-            // Send login success
             LoginSuccessS2C success = new LoginSuccessS2C(
                     pendingHello.name(),
                     pendingHello.profileId());
@@ -69,6 +73,7 @@ public final class LoginManager {
                 if (future.isSuccess()) {
                     handler.setState(ConnectionState.PLAY);
                     sendGameJoin(ctx);
+                    sendPlaySetupPackets(ctx);
                 } else {
                     ctx.close();
                 }
@@ -80,10 +85,12 @@ public final class LoginManager {
     }
 
     private boolean matchesNonce(byte[] decryptedNonce) {
-        // The nonce we sent is stored in the LoginHelloS2C we sent.
-        // For simplicity, we compare against the nonce from the pending hello.
-        // In a real implementation, we'd store the nonce sent to the client.
-        return decryptedNonce != null && decryptedNonce.length >= 4;
+        if (decryptedNonce == null || sentNonce == null) return false;
+        if (decryptedNonce.length != sentNonce.length) return false;
+        for (int i = 0; i < sentNonce.length; i++) {
+            if (decryptedNonce[i] != sentNonce[i]) return false;
+        }
+        return true;
     }
 
     private void sendGameJoin(ChannelHandlerContext ctx) {
@@ -92,32 +99,41 @@ public final class LoginManager {
                         "minecraft", "overworld"),
                 new GameJoinS2C.DimensionKey("minecraft", "dimension_type",
                         "minecraft", "overworld"),
-                0L, // seed
-                0,  // game mode: SURVIVAL
-                0,  // last game mode: SURVIVAL
-                false, // isDebug
-                false, // isFlat
-                false, // hasDeathLocation
-                0,    // portalCooldown
-                64   // seaLevel
+                0L,
+                0,
+                0,
+                false,
+                false,
+                false,
+                0,
+                64
         );
 
         GameJoinS2C join = new GameJoinS2C(
-                0, // playerEntityId
-                false, // hardcore
+                0,
+                false,
                 Set.of(new GameJoinS2C.DimensionKey("minecraft", "dimension_type",
                         "minecraft", "overworld")),
-                20, // maxPlayers
-                10, // viewDistance
-                10, // simulationDistance
-                false, // reducedDebugInfo
-                false, // showDeathScreen
-                false, // doLimitedCrafting
+                20,
+                10,
+                10,
+                false,
+                false,
+                false,
                 spawnInfo,
-                false // enforcesSecureChat
+                false
         );
 
         ctx.writeAndFlush(join);
+    }
+
+    private void sendPlaySetupPackets(ChannelHandlerContext ctx) {
+        ctx.writeAndFlush(new SetCenterChunkS2C(0, 0));
+        ctx.writeAndFlush(new GameEventS2C((byte) 13, 0.0f));
+        ctx.writeAndFlush(new PlayerPositionAndLookS2C(0, 64, 0, 0, 0, (byte) 0, 1));
+        ctx.writeAndFlush(new PlayerInfoUpdateS2C(
+                (byte) (0x01 | 0x02 | 0x04 | 0x08),
+                new UUID[]{pendingHello.profileId()}));
     }
 
     private void log(String message) {

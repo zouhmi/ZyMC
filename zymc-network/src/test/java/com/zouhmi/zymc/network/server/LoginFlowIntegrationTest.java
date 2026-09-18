@@ -2,6 +2,7 @@ package com.zouhmi.zymc.network.server;
 
 import com.zouhmi.zymc.core.ZMCVersion;
 import com.zouhmi.zymc.network.crypto.RSAEngine;
+import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.PacketRegistry;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
@@ -9,6 +10,7 @@ import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2SCodec;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2SCodec;
+import com.zouhmi.zymc.network.protocol.login.LoginHelloS2CCodec;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2SCodec;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
@@ -36,7 +38,9 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import javax.crypto.Cipher;
-import javax.crypto.spec.X509EncodedKeySpec;
+import javax.crypto.spec.SecretKeySpec;
+import java.security.KeyFactory;
+import java.security.spec.X509EncodedKeySpec;
 import static org.junit.jupiter.api.Assertions.*;
 
 final class LoginFlowIntegrationTest {
@@ -44,7 +48,7 @@ final class LoginFlowIntegrationTest {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
-    private final AtomicReference<ConnectionState> observedState = new AtomicReference<>(ConnectionState.HANDSHAKING);
+    private ConnectionRegistry connectionRegistry;
     private final AtomicReference<LoginHelloS2C> receivedLoginHello = new AtomicReference<>();
     private final AtomicReference<LoginSuccessS2C> receivedLoginSuccess = new AtomicReference<>();
     private int port;
@@ -56,19 +60,20 @@ final class LoginFlowIntegrationTest {
         workerGroup = new NioEventLoopGroup();
         rsaEngine = new RSAEngine();
 
-        PacketRegistry registry = new PacketRegistry();
-        registry.register(0x00, HandshakeC2S.class, new HandshakeC2SCodec());
-        registry.register(0x00, StatusRequestC2S.class, new StatusRequestC2SCodec());
-        registry.register(0x00, LoginHelloC2S.class, new LoginHelloC2SCodec());
-        registry.register(0x01, LoginKeyC2S.class, new LoginKeyC2SCodec());
-        registry.addEncoder(StatusResponseS2C.class, new StatusResponseS2CCodec(), 0x00);
-        registry.addEncoder(LoginHelloS2C.class, new LoginHelloS2CCodec(), 0x00);
-        registry.addEncoder(LoginSuccessS2C.class, new LoginSuccessS2CCodec(), 0x02);
+        connectionRegistry = new ConnectionRegistry();
+        connectionRegistry.register(ConnectionState.HANDSHAKING, 0x00, HandshakeC2S.class, new HandshakeC2SCodec());
+        connectionRegistry.register(ConnectionState.STATUS, 0x00, StatusRequestC2S.class, new StatusRequestC2SCodec());
+        connectionRegistry.register(ConnectionState.LOGIN, 0x00, LoginHelloC2S.class, new LoginHelloC2SCodec());
+        connectionRegistry.register(ConnectionState.LOGIN, 0x01, LoginKeyC2S.class, new LoginKeyC2SCodec());
+        connectionRegistry.addEncoder(ConnectionState.STATUS, StatusResponseS2C.class, new StatusResponseS2CCodec(), 0x00);
+        connectionRegistry.addEncoder(ConnectionState.LOGIN, LoginHelloS2C.class, new LoginHelloS2CCodec(), 0x00);
+        connectionRegistry.addEncoder(ConnectionState.LOGIN, LoginSuccessS2C.class, new LoginSuccessS2CCodec(), 0x02);
 
         AtomicReference<LoginHelloC2S> pendingHello = new AtomicReference<>();
         AtomicReference<byte[]> sentNonce = new AtomicReference<>();
 
-        MinecraftServerHandler handler = new MinecraftServerHandler(null, msg -> {},
+        MinecraftServerChannelInitializer initializer = new MinecraftServerChannelInitializer(
+                connectionRegistry, null, msg -> {},
                 null,
                 (ctx, hello) -> {
                     pendingHello.set(hello);
@@ -96,8 +101,6 @@ final class LoginFlowIntegrationTest {
                         ctx.close();
                     }
                 });
-
-        MinecraftServerChannelInitializer initializer = new MinecraftServerChannelInitializer(registry, handler);
         initializer.registerHandshake();
         initializer.registerStatus();
         initializer.registerLogin();
@@ -123,8 +126,8 @@ final class LoginFlowIntegrationTest {
     @Test
     void loginFlowCompletes() throws Exception {
         sendHandshake(25565, HandshakeC2S.ConnectionIntent.LOGIN);
-        awaitState(200);
-        assertEquals(ConnectionState.LOGIN, observedState.get());
+        awaitState(ConnectionState.LOGIN, 200);
+        assertEquals(ConnectionState.LOGIN, connectionRegistry.currentState());
 
         UUID playerUuid = UUID.randomUUID();
         LoginHelloC2S loginHello = new LoginHelloC2S("TestPlayer", playerUuid);
@@ -149,7 +152,7 @@ final class LoginFlowIntegrationTest {
 
         Thread.sleep(200);
 
-        assertEquals(ConnectionState.LOGIN, observedState.get(), "State should remain LOGIN after LoginKey (we don't auto-transition to PLAY in test)");
+        assertEquals(ConnectionState.LOGIN, connectionRegistry.currentState(), "State should remain LOGIN after LoginKey");
         assertNotNull(receivedLoginSuccess.get(), "Server should send LoginSuccess");
         assertEquals("TestPlayer", receivedLoginSuccess.get().name());
         assertEquals(playerUuid, receivedLoginSuccess.get().profileId());
@@ -226,10 +229,10 @@ final class LoginFlowIntegrationTest {
         } while (value != 0);
     }
 
-    private void awaitState(long timeoutMs) throws InterruptedException {
+    private void awaitState(ConnectionState expected, long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
-            if (observedState.get() != ConnectionState.HANDSHAKING) return;
+            if (connectionRegistry.currentState() == expected) return;
             Thread.sleep(10);
         }
     }

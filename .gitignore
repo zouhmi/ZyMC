@@ -23,3 +23,8 @@ jdk-*.tar.gz
 openjdk.tar.gz
 gradle*.zip
 gradle*.tar.gz
+
+# AI-only files (not for GitHub)
+Task-Prompt.md
+Progress.md
+pushingtogithub.md

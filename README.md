@@ -2,6 +2,8 @@
 
 A Minecraft server written from scratch in Java, targeting 1.21.11.
 
+Created by [Zouhir](https://zouhi.com).
+
 ## Build
 
 Requires JDK 21.

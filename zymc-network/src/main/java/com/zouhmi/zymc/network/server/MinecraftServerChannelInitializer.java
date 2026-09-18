@@ -1,9 +1,9 @@
 package com.zouhmi.zymc.network.server;
 
+import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.NettyPacketDecoder;
 import com.zouhmi.zymc.network.protocol.NettyPacketEncoder;
-import com.zouhmi.zymc.network.protocol.PacketRegistry;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2SCodec;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
@@ -14,61 +14,107 @@ import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2SCodec;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2C;
+import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.GameEventS2C;
+import com.zouhmi.zymc.network.protocol.play.GameEventS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.GameJoinS2C;
 import com.zouhmi.zymc.network.protocol.play.GameJoinS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.KeepAliveC2S;
+import com.zouhmi.zymc.network.protocol.play.KeepAliveC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.KeepAliveS2C;
+import com.zouhmi.zymc.network.protocol.play.KeepAliveS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.PlayerInfoUpdateS2C;
+import com.zouhmi.zymc.network.protocol.play.PlayerInfoUpdateS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookC2S;
+import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookS2C;
+import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.SetCenterChunkS2C;
+import com.zouhmi.zymc.network.protocol.play.SetCenterChunkS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.SpawnPositionS2C;
+import com.zouhmi.zymc.network.protocol.play.SpawnPositionS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.SynchronizePlayerPositionS2C;
+import com.zouhmi.zymc.network.protocol.play.SynchronizePlayerPositionS2CCodec;
 import com.zouhmi.zymc.network.protocol.status.StatusRequestC2S;
 import com.zouhmi.zymc.network.protocol.status.StatusRequestC2SCodec;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 public final class MinecraftServerChannelInitializer extends ChannelInitializer<Channel> {
 
-    private final PacketRegistry registry;
-    private final MinecraftServerHandler handler;
+    private final ConnectionRegistry connectionRegistry;
+    private final MinecraftServerHandler.ServerCommandCenter commandCenter;
+    private final MinecraftServerHandler.Logger logger;
+    private final Consumer<HandshakeC2S> handshakeCallback;
+    private final BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler;
+    private final BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler;
 
-    public MinecraftServerChannelInitializer(PacketRegistry registry, MinecraftServerHandler handler) {
-        this.registry = registry;
-        this.handler = handler;
+    public MinecraftServerChannelInitializer(ConnectionRegistry connectionRegistry,
+                                              MinecraftServerHandler.ServerCommandCenter commandCenter,
+                                              MinecraftServerHandler.Logger logger,
+                                              Consumer<HandshakeC2S> handshakeCallback,
+                                              BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler,
+                                              BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler) {
+        this.connectionRegistry = connectionRegistry;
+        this.commandCenter = commandCenter;
+        this.logger = logger;
+        this.handshakeCallback = handshakeCallback;
+        this.loginHelloHandler = loginHelloHandler;
+        this.loginKeyHandler = loginKeyHandler;
+    }
+
+    public MinecraftServerChannelInitializer(ConnectionRegistry connectionRegistry, MinecraftServerHandler handler) {
+        this(connectionRegistry, null, handler.getLogger(), null, null, null);
     }
 
     @Override
     protected void initChannel(Channel ch) {
-        ChannelPipeline pipeline = ch.pipeline();
+        MinecraftServerHandler handler = new MinecraftServerHandler(
+                connectionRegistry, commandCenter, logger,
+                handshakeCallback, loginHelloHandler, loginKeyHandler);
 
+        ChannelPipeline pipeline = ch.pipeline();
         pipeline.addLast(new LoggingHandler(LogLevel.DEBUG));
-        pipeline.addLast(new NettyPacketDecoder(registry));
+        pipeline.addLast(new NettyPacketDecoder(connectionRegistry));
         pipeline.addLast(handler);
-        pipeline.addLast(new NettyPacketEncoder(registry));
+        pipeline.addLast(new NettyPacketEncoder(connectionRegistry));
 
         handler.onChannelConnected(ch);
     }
 
     public void registerHandshake() {
-        registry.register(0x00, HandshakeC2S.class, new HandshakeC2SCodec());
+        connectionRegistry.register(ConnectionState.HANDSHAKING, 0x00, HandshakeC2S.class, new HandshakeC2SCodec());
     }
 
     public void registerStatus() {
-        registry.register(0x00, StatusRequestC2S.class, new StatusRequestC2SCodec());
+        connectionRegistry.register(ConnectionState.STATUS, 0x00, StatusRequestC2S.class, new StatusRequestC2SCodec());
     }
 
     public void registerLogin() {
-        // C2S packets (decoded by server)
-        registry.register(0x00, LoginHelloC2S.class, new LoginHelloC2SCodec());
-        registry.register(0x01, LoginKeyC2S.class, new LoginKeyC2SCodec());
-        // S2C packet classes (encoded by server)
-        registry.addEncoder(LoginHelloS2C.class, new LoginHelloS2CCodec(), 0x00);
-        registry.addEncoder(LoginSuccessS2C.class, new LoginSuccessS2CCodec(), 0x02);
+        connectionRegistry.register(ConnectionState.LOGIN, 0x00, LoginHelloC2S.class, new LoginHelloC2SCodec());
+        connectionRegistry.register(ConnectionState.LOGIN, 0x01, LoginKeyC2S.class, new LoginKeyC2SCodec());
+        connectionRegistry.addEncoder(ConnectionState.LOGIN, LoginHelloS2C.class, new LoginHelloS2CCodec(), 0x00);
+        connectionRegistry.addEncoder(ConnectionState.LOGIN, LoginSuccessS2C.class, new LoginSuccessS2CCodec(), 0x02);
     }
 
     public void registerPlay() {
-        // S2C play packets
-        registry.addEncoder(GameJoinS2C.class, new GameJoinS2CCodec(), 0x00);
-    }
-
-    public void setState(ConnectionState state) {
-        handler.setState(state);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, GameJoinS2C.class, new GameJoinS2CCodec(), 0x30);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, KeepAliveS2C.class, new KeepAliveS2CCodec(), 0x2B);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, ChunkDataAndUpdateLightS2C.class, new ChunkDataAndUpdateLightS2CCodec(), 0x2C);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, PlayerPositionAndLookS2C.class, new PlayerPositionAndLookS2CCodec(), 0x46);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, SpawnPositionS2C.class, new SpawnPositionS2CCodec(), 0x5F);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, GameEventS2C.class, new GameEventS2CCodec(), 0x26);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, SetCenterChunkS2C.class, new SetCenterChunkS2CCodec(), 0x5C);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, PlayerInfoUpdateS2C.class, new PlayerInfoUpdateS2CCodec(), 0x44);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, SynchronizePlayerPositionS2C.class, new SynchronizePlayerPositionS2CCodec(), 0x46);
+        connectionRegistry.register(ConnectionState.PLAY, 0x1B, KeepAliveC2S.class, new KeepAliveC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x0, PlayerPositionAndLookC2S.class, new PlayerPositionAndLookC2SCodec());
     }
 }

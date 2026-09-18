@@ -1,5 +1,6 @@
 package com.zouhmi.zymc.network.protocol.play;
 
+import com.zouhmi.zymc.network.protocol.ByteBufVarInts;
 import com.zouhmi.zymc.network.protocol.PacketCodec;
 import io.netty.buffer.ByteBuf;
 import java.io.IOException;
@@ -10,17 +11,17 @@ public final class GameJoinS2CCodec implements PacketCodec<GameJoinS2C> {
     @Override
     public void encode(GameJoinS2C packet, ByteBuf buf) {
         try {
-            writeVarInt(buf, packet.playerEntityId());
-            writeBoolean(buf, packet.hardcore());
+            ByteBufVarInts.writeVarInt(buf, packet.playerEntityId());
+            ByteBufVarInts.writeBoolean(buf, packet.hardcore());
             writeDimensionKeySet(buf, packet.dimensionIds());
-            writeVarInt(buf, packet.maxPlayers());
-            writeVarInt(buf, packet.viewDistance());
-            writeVarInt(buf, packet.simulationDistance());
-            writeBoolean(buf, packet.reducedDebugInfo());
-            writeBoolean(buf, packet.showDeathScreen());
-            writeBoolean(buf, packet.doLimitedCrafting());
+            ByteBufVarInts.writeVarInt(buf, packet.maxPlayers());
+            ByteBufVarInts.writeVarInt(buf, packet.viewDistance());
+            ByteBufVarInts.writeVarInt(buf, packet.simulationDistance());
+            ByteBufVarInts.writeBoolean(buf, packet.reducedDebugInfo());
+            ByteBufVarInts.writeBoolean(buf, packet.showDeathScreen());
+            ByteBufVarInts.writeBoolean(buf, packet.doLimitedCrafting());
             writeCommonSpawnInfo(buf, packet.commonPlayerSpawnInfo());
-            writeBoolean(buf, packet.enforcesSecureChat());
+            ByteBufVarInts.writeBoolean(buf, packet.enforcesSecureChat());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -29,17 +30,17 @@ public final class GameJoinS2CCodec implements PacketCodec<GameJoinS2C> {
     @Override
     public GameJoinS2C decode(ByteBuf buf) {
         try {
-            int playerEntityId = readVarInt(buf);
-            boolean hardcore = readBoolean(buf);
+            int playerEntityId = ByteBufVarInts.readVarInt(buf);
+            boolean hardcore = ByteBufVarInts.readBoolean(buf);
             Set<GameJoinS2C.DimensionKey> dimensionIds = readDimensionKeySet(buf);
-            int maxPlayers = readVarInt(buf);
-            int viewDistance = readVarInt(buf);
-            int simulationDistance = readVarInt(buf);
-            boolean reducedDebugInfo = readBoolean(buf);
-            boolean showDeathScreen = readBoolean(buf);
-            boolean doLimitedCrafting = readBoolean(buf);
+            int maxPlayers = ByteBufVarInts.readVarInt(buf);
+            int viewDistance = ByteBufVarInts.readVarInt(buf);
+            int simulationDistance = ByteBufVarInts.readVarInt(buf);
+            boolean reducedDebugInfo = ByteBufVarInts.readBoolean(buf);
+            boolean showDeathScreen = ByteBufVarInts.readBoolean(buf);
+            boolean doLimitedCrafting = ByteBufVarInts.readBoolean(buf);
             GameJoinS2C.CommonSpawnInfo spawnInfo = readCommonSpawnInfo(buf);
-            boolean enforcesSecureChat = readBoolean(buf);
+            boolean enforcesSecureChat = ByteBufVarInts.readBoolean(buf);
             return new GameJoinS2C(playerEntityId, hardcore, dimensionIds,
                     maxPlayers, viewDistance, simulationDistance,
                     reducedDebugInfo, showDeathScreen, doLimitedCrafting,
@@ -50,30 +51,6 @@ public final class GameJoinS2CCodec implements PacketCodec<GameJoinS2C> {
     }
 
     // --- helpers ---
-
-    private static void writeVarInt(ByteBuf out, int value) throws IOException {
-        int part;
-        do {
-            part = value & 0x7F;
-            value >>>= 7;
-            if (value != 0) part |= 0x80;
-            out.writeByte(part);
-        } while (value != 0);
-    }
-
-    private static int readVarInt(ByteBuf in) throws IOException {
-        int out = 0;
-        int bytes = 0;
-        int b;
-        while (bytes < 5) {
-            if (!in.isReadable()) throw new IOException("Unexpected end of stream reading VarInt");
-            b = in.readByte() & 0xFF;
-            out |= (b & 0x7F) << (7 * bytes);
-            bytes++;
-            if ((b & 0x80) == 0) break;
-        }
-        return out;
-    }
 
     private static void writeLong(ByteBuf out, long value) {
         for (int i = 7; i >= 0; i--) {
@@ -89,25 +66,12 @@ public final class GameJoinS2CCodec implements PacketCodec<GameJoinS2C> {
         return value;
     }
 
-    private static void writeBoolean(ByteBuf out, boolean value) {
-        out.writeByte(value ? 0x01 : 0x00);
-    }
-
-    private static boolean readBoolean(ByteBuf in) {
-        return in.readByte() != 0x00;
-    }
-
     private static void writeIdentifier(ByteBuf out, String namespace, String name) throws IOException {
-        String s = namespace + ":" + name;
-        writeVarInt(out, s.length());
-        out.writeBytes(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        ByteBufVarInts.writeString(out, namespace + ":" + name);
     }
 
     private static String[] readIdentifier(ByteBuf in) throws IOException {
-        int length = readVarInt(in);
-        byte[] bytes = new byte[length];
-        in.readBytes(bytes);
-        String s = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+        String s = ByteBufVarInts.readString(in);
         int colon = s.indexOf(':');
         if (colon < 0) {
             throw new IOException("Invalid identifier: " + s);
@@ -127,56 +91,57 @@ public final class GameJoinS2CCodec implements PacketCodec<GameJoinS2C> {
     }
 
     private static void writeDimensionKeySet(ByteBuf out, Set<GameJoinS2C.DimensionKey> keys) throws IOException {
-        writeVarInt(out, keys.size());
+        ByteBufVarInts.writeVarInt(out, keys.size());
         for (GameJoinS2C.DimensionKey key : keys) {
             writeDimensionKey(out, key);
         }
     }
 
     private static Set<GameJoinS2C.DimensionKey> readDimensionKeySet(ByteBuf in) throws IOException {
-        int count = readVarInt(in);
+        int count = ByteBufVarInts.readVarInt(in);
+        java.util.Set<GameJoinS2C.DimensionKey> keys = new java.util.HashSet<>();
         for (int i = 0; i < count; i++) {
-            readDimensionKey(in);
+            keys.add(readDimensionKey(in));
         }
-        return java.util.Collections.emptySet();
+        return keys;
     }
 
     private static void writeCommonSpawnInfo(ByteBuf out, GameJoinS2C.CommonSpawnInfo info) throws IOException {
         writeDimensionKey(out, info.dimensionType());
         writeDimensionKey(out, info.dimension());
         writeLong(out, info.seed());
-        writeVarInt(out, info.gameMode());
-        writeVarInt(out, info.lastGameMode());
-        writeBoolean(out, info.isDebug());
-        writeBoolean(out, info.isFlat());
-        writeBoolean(out, info.hasDeathLocation());
+        ByteBufVarInts.writeVarInt(out, info.gameMode());
+        ByteBufVarInts.writeVarInt(out, info.lastGameMode());
+        ByteBufVarInts.writeBoolean(out, info.isDebug());
+        ByteBufVarInts.writeBoolean(out, info.isFlat());
+        ByteBufVarInts.writeBoolean(out, info.hasDeathLocation());
         if (info.hasDeathLocation()) {
             writeDimensionKey(out, info.dimensionType());
             writeLong(out, 0); // x
             writeLong(out, 0); // y
             writeLong(out, 0); // z
         }
-        writeVarInt(out, info.portalCooldown());
-        writeVarInt(out, info.seaLevel());
+        ByteBufVarInts.writeVarInt(out, info.portalCooldown());
+        ByteBufVarInts.writeVarInt(out, info.seaLevel());
     }
 
     private static GameJoinS2C.CommonSpawnInfo readCommonSpawnInfo(ByteBuf in) throws IOException {
         GameJoinS2C.DimensionKey dimensionType = readDimensionKey(in);
         GameJoinS2C.DimensionKey dimension = readDimensionKey(in);
         long seed = readLong(in);
-        int gameMode = readVarInt(in);
-        int lastGameMode = readVarInt(in);
-        boolean isDebug = readBoolean(in);
-        boolean isFlat = readBoolean(in);
-        boolean hasDeathLocation = readBoolean(in);
+        int gameMode = ByteBufVarInts.readVarInt(in);
+        int lastGameMode = ByteBufVarInts.readVarInt(in);
+        boolean isDebug = ByteBufVarInts.readBoolean(in);
+        boolean isFlat = ByteBufVarInts.readBoolean(in);
+        boolean hasDeathLocation = ByteBufVarInts.readBoolean(in);
         if (hasDeathLocation) {
             readDimensionKey(in);
             readLong(in);
             readLong(in);
             readLong(in);
         }
-        int portalCooldown = readVarInt(in);
-        int seaLevel = readVarInt(in);
+        int portalCooldown = ByteBufVarInts.readVarInt(in);
+        int seaLevel = ByteBufVarInts.readVarInt(in);
         return new GameJoinS2C.CommonSpawnInfo(dimensionType, dimension, seed,
                 gameMode, lastGameMode, isDebug, isFlat, hasDeathLocation,
                 portalCooldown, seaLevel);

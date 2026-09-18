@@ -3,6 +3,7 @@ package com.zouhmi.zymc.network.server;
 import com.zouhmi.zymc.core.ZMCVersion;
 import com.zouhmi.zymc.core.buffer.ByteWriter;
 import com.zouhmi.zymc.core.buffer.VarInts;
+import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.PacketRegistry;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
@@ -31,7 +32,7 @@ final class HandshakeServerIntegrationTest {
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
-    private final AtomicReference<ConnectionState> observedState = new AtomicReference<>(ConnectionState.HANDSHAKING);
+    private ConnectionRegistry connectionRegistry;
     private final AtomicReference<HandshakeC2S> observedHandshake = new AtomicReference<>();
     private int port;
 
@@ -40,21 +41,15 @@ final class HandshakeServerIntegrationTest {
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();
 
-        PacketRegistry registry = new PacketRegistry();
-        registry.register(0x00, HandshakeC2S.class, new HandshakeC2SCodec());
+        connectionRegistry = new ConnectionRegistry();
+        connectionRegistry.register(ConnectionState.HANDSHAKING, 0x00, HandshakeC2S.class, new HandshakeC2SCodec());
 
         AtomicReference<HandshakeC2S> handshakeRef = observedHandshake;
-        AtomicReference<ConnectionState> stateRef = observedState;
-        AtomicReference<HandshakeC2S> handshakeRef = observedHandshake;
-        MinecraftServerHandler handler = new MinecraftServerHandler(
-                null,
-                msg -> {},
-                handshake -> {
-                    handshakeRef.set(handshake);
-                    // state stays HANDSHAKING after handshake (we only transition on status/login intent)
-                });
 
-        MinecraftServerChannelInitializer initializer = new MinecraftServerChannelInitializer(registry, handler);
+        MinecraftServerChannelInitializer initializer = new MinecraftServerChannelInitializer(
+                connectionRegistry, null, msg -> {},
+                handshake -> handshakeRef.set(handshake),
+                null, null);
         initializer.registerHandshake();
 
         ServerBootstrap b = new ServerBootstrap();
@@ -87,8 +82,8 @@ final class HandshakeServerIntegrationTest {
 
         clientWrite(clientHandshake);
 
-        awaitState(200);
-        assertEquals(ConnectionState.LOGIN, observedState.get());
+        awaitState(ConnectionState.LOGIN, 200);
+        assertEquals(ConnectionState.LOGIN, connectionRegistry.currentState());
         HandshakeC2S received = observedHandshake.get();
         assertNotNull(received);
         assertEquals(ZMCVersion.PROTOCOL_VERSION, received.protocolVersion());
@@ -107,8 +102,8 @@ final class HandshakeServerIntegrationTest {
 
         clientWrite(clientHandshake);
 
-        awaitState(200);
-        assertEquals(ConnectionState.HANDSHAKING, observedState.get());
+        awaitState(ConnectionState.HANDSHAKING, 200);
+        assertEquals(ConnectionState.HANDSHAKING, connectionRegistry.currentState());
     }
 
     @Test
@@ -121,8 +116,8 @@ final class HandshakeServerIntegrationTest {
 
         clientWrite(clientHandshake);
 
-        awaitState(200);
-        assertEquals(ConnectionState.STATUS, observedState.get());
+        awaitState(ConnectionState.STATUS, 200);
+        assertEquals(ConnectionState.STATUS, connectionRegistry.currentState());
     }
 
     private void clientWrite(HandshakeC2S packet) throws IOException {
@@ -130,16 +125,14 @@ final class HandshakeServerIntegrationTest {
         Socket client = new Socket("127.0.0.1", port);
         client.getOutputStream().write(framed);
         client.getOutputStream().flush();
-        // Keep the socket open briefly so the server's event loop can process the packet
-        // before the client closes the connection.
         try { Thread.sleep(50); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
         client.close();
     }
 
-    private void awaitState(long timeoutMs) throws InterruptedException {
+    private void awaitState(ConnectionState expected, long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
-            if (observedState.get() != ConnectionState.HANDSHAKING) return;
+            if (connectionRegistry.currentState() == expected) return;
             Thread.sleep(10);
         }
     }
