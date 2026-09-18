@@ -13,17 +13,26 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 public final class ZyMCServer {
 
     public static void main(String[] args) throws InterruptedException {
+        boolean onlineMode = true;
+        int port = 25565;
+
+        for (int i = 0; i < args.length; i++) {
+            switch (args[i]) {
+                case "--offline" -> onlineMode = false;
+                case "--port" -> port = Integer.parseInt(args[++i]);
+            }
+        }
+
         System.out.println("ZyMC 0.1.0-SNAPSHOT");
         System.out.println("Starting Minecraft server for 1.21.11...");
+        System.out.println("Online mode: " + onlineMode);
 
         ConnectionRegistry connectionRegistry = new ConnectionRegistry();
         FlatWorldGenerator worldGenerator = new FlatWorldGenerator();
         MinecraftServerHandler.Logger logger = System.out::println;
 
-        MinecraftServerHandler[] handlerRef = new MinecraftServerHandler[1];
-
         LoginManager loginManager = new LoginManager(connectionRegistry, null,
-                (x, z) -> worldGenerator.getChunk(x, z).toNetworkBytes());
+                (x, z) -> worldGenerator.getChunk(x, z).toNetworkBytes(), onlineMode);
         loginManager.setLogger(logger);
 
         MinecraftServerChannelInitializer initializer =
@@ -55,8 +64,8 @@ public final class ZyMCServer {
                 .channel(NioServerSocketChannel.class)
                 .childHandler(initializer);
 
-        bootstrap.bind("0.0.0.0", 25565).sync();
-        System.out.println("Listening on 0.0.0.0:25565");
+        bootstrap.bind("0.0.0.0", port).sync();
+        System.out.println("Listening on 0.0.0.0:" + port);
 
         Thread.currentThread().join();
     }

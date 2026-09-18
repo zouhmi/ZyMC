@@ -1,12 +1,13 @@
 package com.zouhmi.zymc.network.server;
 
+import com.zouhmi.zymc.network.crypto.NettyCipherDecoder;
+import com.zouhmi.zymc.network.crypto.NettyCipherEncoder;
 import com.zouhmi.zymc.network.crypto.RSAEngine;
 import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.configuration.FinishConfigurationS2C;
 import com.zouhmi.zymc.network.protocol.configuration.KnownPacksS2C;
 import com.zouhmi.zymc.network.protocol.configuration.PluginMessageConfigurationS2C;
-import com.zouhmi.zymc.network.protocol.configuration.RegistryDataS2C;
 import com.zouhmi.zymc.network.protocol.configuration.UpdateTagsS2C;
 import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2C;
 import com.zouhmi.zymc.network.protocol.play.GameEventS2C;
@@ -23,6 +24,8 @@ import com.zouhmi.zymc.network.protocol.login.LoginHelloS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
 import io.netty.channel.ChannelHandlerContext;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -30,25 +33,33 @@ import java.util.function.BiFunction;
 
 public final class LoginManager {
 
+    private static final String SERVER_ID = "zyMC";
+
     private final ConnectionRegistry connectionRegistry;
     private final RSAEngine rsaEngine;
     private MinecraftServerHandler handler;
     private final BiFunction<Integer, Integer, byte[]> chunkProvider;
-    private final String serverId;
+    private final boolean onlineMode;
     private MinecraftServerHandler.Logger overrideLogger;
 
     private ChannelHandlerContext ctx;
     private LoginHelloC2S pendingHello;
     private byte[] sentNonce;
+    private byte[] sharedSecret;
     private boolean configurationSent;
 
     public LoginManager(ConnectionRegistry connectionRegistry, MinecraftServerHandler handler,
-                         BiFunction<Integer, Integer, byte[]> chunkProvider) {
+                         BiFunction<Integer, Integer, byte[]> chunkProvider, boolean onlineMode) {
         this.connectionRegistry = connectionRegistry;
         this.handler = handler;
         this.rsaEngine = new RSAEngine();
         this.chunkProvider = chunkProvider;
-        this.serverId = "";
+        this.onlineMode = onlineMode;
+    }
+
+    public LoginManager(ConnectionRegistry connectionRegistry, MinecraftServerHandler handler,
+                         BiFunction<Integer, Integer, byte[]> chunkProvider) {
+        this(connectionRegistry, handler, chunkProvider, true);
     }
 
     public void setHandler(MinecraftServerHandler handler) {
@@ -68,10 +79,10 @@ public final class LoginManager {
         this.sentNonce = nonce;
 
         LoginHelloS2C response = new LoginHelloS2C(
-                serverId,
+                SERVER_ID,
                 rsaEngine.encryptPublicKeyDer(),
                 nonce,
-                false);
+                onlineMode);
 
         ctx.writeAndFlush(response);
     }
@@ -82,9 +93,14 @@ public final class LoginManager {
             byte[] decryptedNonce = rsaEngine.decryptWithPrivateKey(key.nonce());
 
             if (!matchesNonce(decryptedNonce)) {
+                log("Nonce mismatch, disconnecting");
                 ctx.close();
                 return;
             }
+
+            this.sharedSecret = decryptedSecret;
+
+            String serverHash = computeServerHash(SERVER_ID, sharedSecret, rsaEngine.getPublicKey());
 
             LoginSuccessS2C success = new LoginSuccessS2C(
                     pendingHello.name(),
@@ -92,6 +108,7 @@ public final class LoginManager {
 
             ctx.writeAndFlush(success).addListener(future -> {
                 if (future.isSuccess()) {
+                    enableEncryption(ctx);
                     handler.setState(ConnectionState.CONFIGURATION);
                     sendConfiguration(ctx);
                 } else {
@@ -115,6 +132,12 @@ public final class LoginManager {
         handler.getKeepAliveManager().start(ctx.channel());
     }
 
+    private void enableEncryption(ChannelHandlerContext ctx) {
+        ctx.pipeline().addBefore("packet-decoder", "cipher-decoder", new NettyCipherDecoder(sharedSecret));
+        ctx.pipeline().addAfter("packet-encoder", "cipher-encoder", new NettyCipherEncoder(sharedSecret));
+        log("Encryption enabled");
+    }
+
     private boolean matchesNonce(byte[] decryptedNonce) {
         if (decryptedNonce == null || sentNonce == null) return false;
         if (decryptedNonce.length != sentNonce.length) return false;
@@ -125,7 +148,7 @@ public final class LoginManager {
     }
 
     private void sendConfiguration(ChannelHandlerContext ctx) {
-        ctx.writeAndFlush(new PluginMessageConfigurationS2C("minecraft:brand", new byte[]{0x06, 'Z', 'y', 'M', 'C', ' ', '1', '0'}));
+        ctx.writeAndFlush(new PluginMessageConfigurationS2C("minecraft:brand", "ZyMC 0.1".getBytes(StandardCharsets.UTF_8)));
         ctx.writeAndFlush(new KnownPacksS2C("minecraft", "minecraft", "1.21.4"));
         ctx.writeAndFlush(new UpdateTagsS2C());
         ctx.writeAndFlush(new FinishConfigurationS2C());
@@ -135,9 +158,9 @@ public final class LoginManager {
         GameJoinS2C.CommonSpawnInfo spawnInfo = new GameJoinS2C.CommonSpawnInfo(
                 new GameJoinS2C.DimensionKey("minecraft", "dimension_type",
                         "minecraft", "overworld"),
-                new GameJoinS2C.DimensionKey("minecraft", "dimension_type",
+                new GameJoinS2C.DimensionKey("minecraft", "dimension",
                         "minecraft", "overworld"),
-                0L, 0, 0, false, false, false, 0, 64);
+                0L, 1, 1, false, true, false, 0, 64);
 
         GameJoinS2C join = new GameJoinS2C(
                 1, false,
@@ -170,6 +193,30 @@ public final class LoginManager {
             }
         }
         log("Sent %d chunks".formatted((viewDistance * 2 + 1) * (viewDistance * 2 + 1)));
+    }
+
+    private static String computeServerHash(String serverId, byte[] sharedSecret, java.security.PublicKey publicKey) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-1");
+            md.update(serverId.getBytes(StandardCharsets.US_ASCII));
+            md.update(sharedSecret);
+            md.update(publicKey.getEncoded());
+            byte[] hash = md.digest();
+            boolean negative = (hash[0] & 0x80) != 0;
+            if (negative) {
+                for (int i = hash.length - 1; i >= 0; i--) {
+                    hash[i] = (byte) (hash[i] + 1);
+                    if (hash[i] != 0) break;
+                }
+            }
+            StringBuilder sb = new StringBuilder();
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b & 0xFF));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to compute server hash", e);
+        }
     }
 
     private void log(String message) {

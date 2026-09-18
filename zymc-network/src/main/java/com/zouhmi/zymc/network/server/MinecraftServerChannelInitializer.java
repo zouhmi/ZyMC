@@ -133,9 +133,9 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
 
         ChannelPipeline pipeline = ch.pipeline();
         pipeline.addLast(new LoggingHandler(LogLevel.DEBUG));
-        pipeline.addLast(new NettyPacketDecoder(connectionRegistry));
+        pipeline.addLast("packet-decoder", new NettyPacketDecoder(connectionRegistry));
         pipeline.addLast(handler);
-        pipeline.addLast(new NettyPacketEncoder(connectionRegistry));
+        pipeline.addLast("packet-encoder", new NettyPacketEncoder(connectionRegistry));
 
         handler.onChannelConnected(ch);
     }
