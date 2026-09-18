@@ -6,9 +6,13 @@ import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2C;
 import com.zouhmi.zymc.network.protocol.play.GameEventS2C;
 import com.zouhmi.zymc.network.protocol.play.GameJoinS2C;
+import com.zouhmi.zymc.network.protocol.play.PlayerAbilitiesS2C;
 import com.zouhmi.zymc.network.protocol.play.PlayerInfoUpdateS2C;
 import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookS2C;
 import com.zouhmi.zymc.network.protocol.play.SetCenterChunkS2C;
+import com.zouhmi.zymc.network.protocol.play.SetSimulationDistanceS2C;
+import com.zouhmi.zymc.network.protocol.play.SetTimeS2C;
+import com.zouhmi.zymc.network.protocol.play.SystemChatS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
@@ -120,6 +124,10 @@ public final class LoginManager {
                 new UUID[]{pendingHello.profileId()}));
         ctx.writeAndFlush(new SetCenterChunkS2C(0, 0));
         ctx.writeAndFlush(new GameEventS2C((byte) 13, 0.0f));
+        ctx.writeAndFlush(new PlayerAbilitiesS2C((byte) 0x01, 0.05f, 110.0f));
+        ctx.writeAndFlush(new SetSimulationDistanceS2C(10));
+        ctx.writeAndFlush(new SetTimeS2C(6000, 6000, false));
+        ctx.writeAndFlush(new SystemChatS2C("{\"text\":\"Welcome to ZyMC!\",\"color\":\"green\"}", false));
         ctx.writeAndFlush(new PlayerPositionAndLookS2C(0.5, 65.0, 0.5, 0, 0, (byte) 0, 1));
     }
 

@@ -8,8 +8,15 @@ import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
 import com.zouhmi.zymc.network.protocol.play.AcceptTeleportationC2S;
+import com.zouhmi.zymc.network.protocol.play.ChatCommandC2S;
+import com.zouhmi.zymc.network.protocol.play.ChatMessageC2S;
+import com.zouhmi.zymc.network.protocol.play.ClientCommandC2S;
+import com.zouhmi.zymc.network.protocol.play.ClientInformationC2S;
 import com.zouhmi.zymc.network.protocol.play.KeepAliveC2S;
-import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerPosC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerPosRotC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerRotC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerStatusOnlyC2S;
 import com.zouhmi.zymc.network.protocol.status.StatusRequestC2S;
 import com.zouhmi.zymc.network.protocol.status.StatusResponseS2C;
 import io.netty.channel.Channel;
@@ -65,6 +72,12 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     }
 
     @Override
+    public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+        logger.log("Exception from %s: %s".formatted(ctx.channel().remoteAddress(), cause.getMessage()));
+        ctx.close();
+    }
+
+    @Override
     public void channelRead0(ChannelHandlerContext ctx, Packet<?> packet) throws Exception {
         ConnectionState state = connectionRegistry.currentState();
         switch (state) {
@@ -85,18 +98,35 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
                     handleLoginKey(ctx, key);
                 }
             }
-            case PLAY -> {
-                if (packet instanceof KeepAliveC2S keepAlive) {
-                    keepAliveManager.handleResponse(ctx.channel(), keepAlive.id());
-                } else if (packet instanceof PlayerPositionAndLookC2S pos) {
-                    logger.log("Player position: x=%.2f y=%.2f z=%.2f".formatted(pos.x(), pos.y(), pos.z()));
-                } else if (packet instanceof AcceptTeleportationC2S teleport) {
-                    logger.log("Teleport confirmed: id=%d".formatted(teleport.teleportId()));
-                } else {
-                    logger.log("Unhandled play packet: %s".formatted(packet.getClass().getSimpleName()));
-                }
-            }
+            case PLAY -> handlePlayPacket(ctx, packet);
             default -> throw new IllegalStateException("Unknown connection state: " + state);
+        }
+    }
+
+    private void handlePlayPacket(ChannelHandlerContext ctx, Packet<?> packet) {
+        if (packet instanceof KeepAliveC2S keepAlive) {
+            keepAliveManager.handleResponse(ctx.channel(), keepAlive.id());
+        } else if (packet instanceof AcceptTeleportationC2S teleport) {
+            logger.log("Teleport confirmed: id=%d".formatted(teleport.teleportId()));
+        } else if (packet instanceof MovePlayerPosC2S pos) {
+            logger.log("Move: x=%.2f y=%.2f z=%.2f".formatted(pos.x(), pos.y(), pos.z()));
+        } else if (packet instanceof MovePlayerPosRotC2S pos) {
+            logger.log("Move+Rot: x=%.2f y=%.2f z=%.2f yaw=%.1f pitch=%.1f"
+                    .formatted(pos.x(), pos.y(), pos.z(), pos.yaw(), pos.pitch()));
+        } else if (packet instanceof MovePlayerRotC2S rot) {
+            logger.log("Rot: yaw=%.1f pitch=%.1f".formatted(rot.yaw(), rot.pitch()));
+        } else if (packet instanceof MovePlayerStatusOnlyC2S status) {
+            // onGround only, no-op
+        } else if (packet instanceof ChatCommandC2S cmd) {
+            logger.log("Command: /%s".formatted(cmd.command()));
+        } else if (packet instanceof ChatMessageC2S msg) {
+            logger.log("Chat: %s".formatted(msg.message()));
+        } else if (packet instanceof ClientCommandC2S clientCmd) {
+            logger.log("Client command: action=%d".formatted(clientCmd.actionId()));
+        } else if (packet instanceof ClientInformationC2S info) {
+            logger.log("Client info: locale=%s viewDist=%d".formatted(info.locale(), info.viewDistance()));
+        } else {
+            logger.log("Unhandled play packet: %s".formatted(packet.getClass().getSimpleName()));
         }
     }
 
@@ -127,7 +157,7 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     private void handleStatusRequest(ChannelHandlerContext ctx) {
         logger.log("Status request from %s".formatted(ctx.channel().remoteAddress()));
         String json = "{\"version\":{\"name\":\"%s\",\"protocol\":%d},"
-                + "\"players\":{\"max\":%d},\"description\":{\"text\":\"%s\"}}"
+                + "\"players\":{\"max\":%d,\"online\":0},\"description\":{\"text\":\"%s\"}}"
                 .formatted(ZMCVersion.MC_TARGET, ZMCVersion.PROTOCOL_VERSION, 20, "ZyMC");
         ctx.writeAndFlush(new StatusResponseS2C(json));
     }

@@ -16,8 +16,18 @@ import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.AcceptTeleportationC2S;
 import com.zouhmi.zymc.network.protocol.play.AcceptTeleportationC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.ChatCommandC2S;
+import com.zouhmi.zymc.network.protocol.play.ChatCommandC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.ChatMessageC2S;
+import com.zouhmi.zymc.network.protocol.play.ChatMessageC2SCodec;
 import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2C;
 import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.ClientCommandC2S;
+import com.zouhmi.zymc.network.protocol.play.ClientCommandC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.ClientInformationC2S;
+import com.zouhmi.zymc.network.protocol.play.ClientInformationC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.DisconnectPlayS2C;
+import com.zouhmi.zymc.network.protocol.play.DisconnectPlayS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.GameEventS2C;
 import com.zouhmi.zymc.network.protocol.play.GameEventS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.GameJoinS2C;
@@ -26,18 +36,36 @@ import com.zouhmi.zymc.network.protocol.play.KeepAliveC2S;
 import com.zouhmi.zymc.network.protocol.play.KeepAliveC2SCodec;
 import com.zouhmi.zymc.network.protocol.play.KeepAliveS2C;
 import com.zouhmi.zymc.network.protocol.play.KeepAliveS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerPosC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerPosC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerPosRotC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerPosRotC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerRotC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerRotC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerStatusOnlyC2S;
+import com.zouhmi.zymc.network.protocol.play.MovePlayerStatusOnlyC2SCodec;
+import com.zouhmi.zymc.network.protocol.play.PlayerAbilitiesS2C;
+import com.zouhmi.zymc.network.protocol.play.PlayerAbilitiesS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.PlayerInfoUpdateS2C;
 import com.zouhmi.zymc.network.protocol.play.PlayerInfoUpdateS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookC2S;
 import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookC2SCodec;
 import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookS2C;
 import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.PlayerRotationS2C;
+import com.zouhmi.zymc.network.protocol.play.PlayerRotationS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.SetCenterChunkS2C;
 import com.zouhmi.zymc.network.protocol.play.SetCenterChunkS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.SetSimulationDistanceS2C;
+import com.zouhmi.zymc.network.protocol.play.SetSimulationDistanceS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.SetTimeS2C;
+import com.zouhmi.zymc.network.protocol.play.SetTimeS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.SpawnPositionS2C;
 import com.zouhmi.zymc.network.protocol.play.SpawnPositionS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.SynchronizePlayerPositionS2C;
 import com.zouhmi.zymc.network.protocol.play.SynchronizePlayerPositionS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.SystemChatS2C;
+import com.zouhmi.zymc.network.protocol.play.SystemChatS2CCodec;
 import com.zouhmi.zymc.network.protocol.status.StatusRequestC2S;
 import com.zouhmi.zymc.network.protocol.status.StatusRequestC2SCodec;
 import io.netty.channel.Channel;
@@ -107,6 +135,7 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
     }
 
     public void registerPlay() {
+        // S2C packets
         connectionRegistry.addEncoder(ConnectionState.PLAY, GameJoinS2C.class, new GameJoinS2CCodec(), 0x30);
         connectionRegistry.addEncoder(ConnectionState.PLAY, KeepAliveS2C.class, new KeepAliveS2CCodec(), 0x2B);
         connectionRegistry.addEncoder(ConnectionState.PLAY, ChunkDataAndUpdateLightS2C.class, new ChunkDataAndUpdateLightS2CCodec(), 0x2C);
@@ -116,8 +145,22 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
         connectionRegistry.addEncoder(ConnectionState.PLAY, SetCenterChunkS2C.class, new SetCenterChunkS2CCodec(), 0x5C);
         connectionRegistry.addEncoder(ConnectionState.PLAY, PlayerInfoUpdateS2C.class, new PlayerInfoUpdateS2CCodec(), 0x44);
         connectionRegistry.addEncoder(ConnectionState.PLAY, SynchronizePlayerPositionS2C.class, new SynchronizePlayerPositionS2CCodec(), 0x46);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, PlayerAbilitiesS2C.class, new PlayerAbilitiesS2CCodec(), 0x3E);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, SystemChatS2C.class, new SystemChatS2CCodec(), 0x77);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, DisconnectPlayS2C.class, new DisconnectPlayS2CCodec(), 0x20);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, SetSimulationDistanceS2C.class, new SetSimulationDistanceS2CCodec(), 0x6D);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, SetTimeS2C.class, new SetTimeS2CCodec(), 0x6F);
+        connectionRegistry.addEncoder(ConnectionState.PLAY, PlayerRotationS2C.class, new PlayerRotationS2CCodec(), 0x47);
+        // C2S packets
         connectionRegistry.register(ConnectionState.PLAY, 0x1B, KeepAliveC2S.class, new KeepAliveC2SCodec());
         connectionRegistry.register(ConnectionState.PLAY, 0x0, AcceptTeleportationC2S.class, new AcceptTeleportationC2SCodec());
-        connectionRegistry.register(ConnectionState.PLAY, 0x1E, PlayerPositionAndLookC2S.class, new PlayerPositionAndLookC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x1E, MovePlayerPosRotC2S.class, new MovePlayerPosRotC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x1D, MovePlayerPosC2S.class, new MovePlayerPosC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x1F, MovePlayerRotC2S.class, new MovePlayerRotC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x20, MovePlayerStatusOnlyC2S.class, new MovePlayerStatusOnlyC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x6, ChatCommandC2S.class, new ChatCommandC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x8, ChatMessageC2S.class, new ChatMessageC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0xB, ClientCommandC2S.class, new ClientCommandC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0xD, ClientInformationC2S.class, new ClientInformationC2SCodec());
     }
 }
