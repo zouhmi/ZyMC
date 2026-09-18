@@ -3,6 +3,11 @@ package com.zouhmi.zymc.network.server;
 import com.zouhmi.zymc.network.crypto.RSAEngine;
 import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
+import com.zouhmi.zymc.network.protocol.configuration.FinishConfigurationS2C;
+import com.zouhmi.zymc.network.protocol.configuration.KnownPacksS2C;
+import com.zouhmi.zymc.network.protocol.configuration.PluginMessageConfigurationS2C;
+import com.zouhmi.zymc.network.protocol.configuration.RegistryDataS2C;
+import com.zouhmi.zymc.network.protocol.configuration.UpdateTagsS2C;
 import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2C;
 import com.zouhmi.zymc.network.protocol.play.GameEventS2C;
 import com.zouhmi.zymc.network.protocol.play.GameJoinS2C;
@@ -27,13 +32,15 @@ public final class LoginManager {
 
     private final ConnectionRegistry connectionRegistry;
     private final RSAEngine rsaEngine;
-    private final MinecraftServerHandler handler;
+    private MinecraftServerHandler handler;
     private final BiFunction<Integer, Integer, byte[]> chunkProvider;
     private final String serverId;
+    private MinecraftServerHandler.Logger overrideLogger;
 
     private ChannelHandlerContext ctx;
     private LoginHelloC2S pendingHello;
     private byte[] sentNonce;
+    private boolean configurationSent;
 
     public LoginManager(ConnectionRegistry connectionRegistry, MinecraftServerHandler handler,
                          BiFunction<Integer, Integer, byte[]> chunkProvider) {
@@ -42,6 +49,14 @@ public final class LoginManager {
         this.rsaEngine = new RSAEngine();
         this.chunkProvider = chunkProvider;
         this.serverId = "";
+    }
+
+    public void setHandler(MinecraftServerHandler handler) {
+        this.handler = handler;
+    }
+
+    public void setLogger(MinecraftServerHandler.Logger logger) {
+        this.overrideLogger = logger;
     }
 
     public void onLoginHello(ChannelHandlerContext ctx, LoginHelloC2S hello) {
@@ -77,11 +92,8 @@ public final class LoginManager {
 
             ctx.writeAndFlush(success).addListener(future -> {
                 if (future.isSuccess()) {
-                    handler.setState(ConnectionState.PLAY);
-                    sendGameJoin(ctx);
-                    sendPlaySetupPackets(ctx);
-                    sendChunks(ctx);
-                    handler.getKeepAliveManager().start(ctx.channel());
+                    handler.setState(ConnectionState.CONFIGURATION);
+                    sendConfiguration(ctx);
                 } else {
                     ctx.close();
                 }
@@ -92,6 +104,17 @@ public final class LoginManager {
         }
     }
 
+    public void onConfigurationFinish(ChannelHandlerContext ctx) {
+        if (configurationSent) return;
+        configurationSent = true;
+
+        handler.setState(ConnectionState.PLAY);
+        sendGameJoin(ctx);
+        sendPlaySetupPackets(ctx);
+        sendChunks(ctx);
+        handler.getKeepAliveManager().start(ctx.channel());
+    }
+
     private boolean matchesNonce(byte[] decryptedNonce) {
         if (decryptedNonce == null || sentNonce == null) return false;
         if (decryptedNonce.length != sentNonce.length) return false;
@@ -99,6 +122,13 @@ public final class LoginManager {
             if (decryptedNonce[i] != sentNonce[i]) return false;
         }
         return true;
+    }
+
+    private void sendConfiguration(ChannelHandlerContext ctx) {
+        ctx.writeAndFlush(new PluginMessageConfigurationS2C("minecraft:brand", new byte[]{0x06, 'Z', 'y', 'M', 'C', ' ', '1', '0'}));
+        ctx.writeAndFlush(new KnownPacksS2C("minecraft", "minecraft", "1.21.4"));
+        ctx.writeAndFlush(new UpdateTagsS2C());
+        ctx.writeAndFlush(new FinishConfigurationS2C());
     }
 
     private void sendGameJoin(ChannelHandlerContext ctx) {
@@ -143,10 +173,15 @@ public final class LoginManager {
     }
 
     private void log(String message) {
-        handler.getLogger().log(message);
+        if (handler != null) {
+            handler.getLogger().log(message);
+        } else if (overrideLogger != null) {
+            overrideLogger.log(message);
+        }
     }
 
     public MinecraftServerHandler.Logger getLogger() {
-        return handler.getLogger();
+        if (handler != null) return handler.getLogger();
+        return overrideLogger;
     }
 }

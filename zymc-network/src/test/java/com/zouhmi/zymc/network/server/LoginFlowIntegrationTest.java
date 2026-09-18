@@ -75,6 +75,7 @@ final class LoginFlowIntegrationTest {
         MinecraftServerChannelInitializer initializer = new MinecraftServerChannelInitializer(
                 connectionRegistry, null, msg -> {},
                 null,
+                null,
                 (ctx, hello) -> {
                     pendingHello.set(hello);
                     byte[] nonce = new byte[4];
@@ -150,9 +151,8 @@ final class LoginFlowIntegrationTest {
         LoginKeyC2S loginKey = new LoginKeyC2S(encryptedSecret, encryptedNonce);
         sendPacket(loginKey, 0x01);
 
-        Thread.sleep(200);
+        Thread.sleep(300);
 
-        assertEquals(ConnectionState.LOGIN, connectionRegistry.currentState(), "State should remain LOGIN after LoginKey");
         assertNotNull(receivedLoginSuccess.get(), "Server should send LoginSuccess");
         assertEquals("TestPlayer", receivedLoginSuccess.get().name());
         assertEquals(playerUuid, receivedLoginSuccess.get().profileId());

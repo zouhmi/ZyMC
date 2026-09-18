@@ -4,6 +4,24 @@ import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.NettyPacketDecoder;
 import com.zouhmi.zymc.network.protocol.NettyPacketEncoder;
+import com.zouhmi.zymc.network.protocol.configuration.ClientInformationConfigurationC2S;
+import com.zouhmi.zymc.network.protocol.configuration.ClientInformationConfigurationC2SCodec;
+import com.zouhmi.zymc.network.protocol.configuration.FinishConfigurationC2S;
+import com.zouhmi.zymc.network.protocol.configuration.FinishConfigurationC2SCodec;
+import com.zouhmi.zymc.network.protocol.configuration.FinishConfigurationS2C;
+import com.zouhmi.zymc.network.protocol.configuration.FinishConfigurationS2CCodec;
+import com.zouhmi.zymc.network.protocol.configuration.KnownPacksS2C;
+import com.zouhmi.zymc.network.protocol.configuration.KnownPacksS2CCodec;
+import com.zouhmi.zymc.network.protocol.configuration.PingConfigurationC2S;
+import com.zouhmi.zymc.network.protocol.configuration.PingConfigurationC2SCodec;
+import com.zouhmi.zymc.network.protocol.configuration.PingConfigurationS2C;
+import com.zouhmi.zymc.network.protocol.configuration.PingConfigurationS2CCodec;
+import com.zouhmi.zymc.network.protocol.configuration.PluginMessageConfigurationS2C;
+import com.zouhmi.zymc.network.protocol.configuration.PluginMessageConfigurationS2CCodec;
+import com.zouhmi.zymc.network.protocol.configuration.RegistryDataS2C;
+import com.zouhmi.zymc.network.protocol.configuration.RegistryDataS2CCodec;
+import com.zouhmi.zymc.network.protocol.configuration.UpdateTagsS2C;
+import com.zouhmi.zymc.network.protocol.configuration.UpdateTagsS2CCodec;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2SCodec;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
@@ -82,6 +100,7 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
     private final ConnectionRegistry connectionRegistry;
     private final MinecraftServerHandler.ServerCommandCenter commandCenter;
     private final MinecraftServerHandler.Logger logger;
+    private final LoginManager loginManager;
     private final Consumer<HandshakeC2S> handshakeCallback;
     private final BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler;
     private final BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler;
@@ -89,26 +108,28 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
     public MinecraftServerChannelInitializer(ConnectionRegistry connectionRegistry,
                                               MinecraftServerHandler.ServerCommandCenter commandCenter,
                                               MinecraftServerHandler.Logger logger,
+                                              LoginManager loginManager,
                                               Consumer<HandshakeC2S> handshakeCallback,
                                               BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler,
                                               BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler) {
         this.connectionRegistry = connectionRegistry;
         this.commandCenter = commandCenter;
         this.logger = logger;
+        this.loginManager = loginManager;
         this.handshakeCallback = handshakeCallback;
         this.loginHelloHandler = loginHelloHandler;
         this.loginKeyHandler = loginKeyHandler;
     }
 
     public MinecraftServerChannelInitializer(ConnectionRegistry connectionRegistry, MinecraftServerHandler handler) {
-        this(connectionRegistry, null, handler.getLogger(), null, null, null);
+        this(connectionRegistry, null, handler.getLogger(), null, null, null, null);
     }
 
     @Override
     protected void initChannel(Channel ch) {
         MinecraftServerHandler handler = new MinecraftServerHandler(
                 connectionRegistry, commandCenter, logger,
-                handshakeCallback, loginHelloHandler, loginKeyHandler);
+                loginManager, handshakeCallback, loginHelloHandler, loginKeyHandler);
 
         ChannelPipeline pipeline = ch.pipeline();
         pipeline.addLast(new LoggingHandler(LogLevel.DEBUG));
@@ -132,6 +153,18 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
         connectionRegistry.register(ConnectionState.LOGIN, 0x01, LoginKeyC2S.class, new LoginKeyC2SCodec());
         connectionRegistry.addEncoder(ConnectionState.LOGIN, LoginHelloS2C.class, new LoginHelloS2CCodec(), 0x00);
         connectionRegistry.addEncoder(ConnectionState.LOGIN, LoginSuccessS2C.class, new LoginSuccessS2CCodec(), 0x02);
+    }
+
+    public void registerConfiguration() {
+        connectionRegistry.register(ConnectionState.CONFIGURATION, 0x00, ClientInformationConfigurationC2S.class, new ClientInformationConfigurationC2SCodec());
+        connectionRegistry.register(ConnectionState.CONFIGURATION, 0x02, FinishConfigurationC2S.class, new FinishConfigurationC2SCodec());
+        connectionRegistry.register(ConnectionState.CONFIGURATION, 0x03, PingConfigurationC2S.class, new PingConfigurationC2SCodec());
+        connectionRegistry.addEncoder(ConnectionState.CONFIGURATION, RegistryDataS2C.class, new RegistryDataS2CCodec(), 0x05);
+        connectionRegistry.addEncoder(ConnectionState.CONFIGURATION, FinishConfigurationS2C.class, new FinishConfigurationS2CCodec(), 0x02);
+        connectionRegistry.addEncoder(ConnectionState.CONFIGURATION, KnownPacksS2C.class, new KnownPacksS2CCodec(), 0x0E);
+        connectionRegistry.addEncoder(ConnectionState.CONFIGURATION, UpdateTagsS2C.class, new UpdateTagsS2CCodec(), 0x0D);
+        connectionRegistry.addEncoder(ConnectionState.CONFIGURATION, PluginMessageConfigurationS2C.class, new PluginMessageConfigurationS2CCodec(), 0x00);
+        connectionRegistry.addEncoder(ConnectionState.CONFIGURATION, PingConfigurationS2C.class, new PingConfigurationS2CCodec(), 0x03);
     }
 
     public void registerPlay() {

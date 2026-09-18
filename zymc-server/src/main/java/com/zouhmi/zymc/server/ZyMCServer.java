@@ -20,22 +20,23 @@ public final class ZyMCServer {
         FlatWorldGenerator worldGenerator = new FlatWorldGenerator();
         MinecraftServerHandler.Logger logger = System.out::println;
 
-        LoginManager[] loginManagerRef = new LoginManager[1];
+        MinecraftServerHandler[] handlerRef = new MinecraftServerHandler[1];
+
+        LoginManager loginManager = new LoginManager(connectionRegistry, null,
+                (x, z) -> worldGenerator.getChunk(x, z).toNetworkBytes());
+        loginManager.setLogger(logger);
 
         MinecraftServerChannelInitializer initializer =
                 new MinecraftServerChannelInitializer(connectionRegistry, null, logger,
+                        loginManager,
                         null,
-                        (ctx, hello) -> loginManagerRef[0].onLoginHello(ctx, hello),
-                        (ctx, key) -> loginManagerRef[0].onLoginKey(ctx, key));
-
-        MinecraftServerHandler tempHandler = new MinecraftServerHandler(connectionRegistry, null, logger);
-        LoginManager loginManager = new LoginManager(connectionRegistry, tempHandler,
-                (x, z) -> worldGenerator.getChunk(x, z).toNetworkBytes());
-        loginManagerRef[0] = loginManager;
+                        (ctx, hello) -> loginManager.onLoginHello(ctx, hello),
+                        (ctx, key) -> loginManager.onLoginKey(ctx, key));
 
         initializer.registerHandshake();
         initializer.registerStatus();
         initializer.registerLogin();
+        initializer.registerConfiguration();
         initializer.registerPlay();
 
         int bossThreads = 1;

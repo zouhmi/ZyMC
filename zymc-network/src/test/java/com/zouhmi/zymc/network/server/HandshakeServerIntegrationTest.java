@@ -48,6 +48,7 @@ final class HandshakeServerIntegrationTest {
 
         MinecraftServerChannelInitializer initializer = new MinecraftServerChannelInitializer(
                 connectionRegistry, null, msg -> {},
+                null,
                 handshake -> handshakeRef.set(handshake),
                 null, null);
         initializer.registerHandshake();

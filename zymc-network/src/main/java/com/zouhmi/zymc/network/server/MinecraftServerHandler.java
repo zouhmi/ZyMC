@@ -4,6 +4,8 @@ import com.zouhmi.zymc.core.ZMCVersion;
 import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.protocol.ConnectionState;
 import com.zouhmi.zymc.network.protocol.Packet;
+import com.zouhmi.zymc.network.protocol.configuration.FinishConfigurationC2S;
+import com.zouhmi.zymc.network.protocol.configuration.PingConfigurationC2S;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
@@ -29,21 +31,24 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     private final ServerCommandCenter commandCenter;
     private final Logger logger;
     private final KeepAliveManager keepAliveManager;
+    private final LoginManager loginManager;
     private java.util.function.Consumer<HandshakeC2S> handshakeCallback;
     private java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler;
     private java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler;
 
     public MinecraftServerHandler(ConnectionRegistry connectionRegistry, ServerCommandCenter commandCenter, Logger logger) {
-        this(connectionRegistry, commandCenter, logger, null, null, null);
+        this(connectionRegistry, commandCenter, logger, null, null, null, null);
     }
 
     public MinecraftServerHandler(ConnectionRegistry connectionRegistry, ServerCommandCenter commandCenter, Logger logger,
+                                   LoginManager loginManager,
                                    java.util.function.Consumer<HandshakeC2S> handshakeCallback,
                                    java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler,
                                    java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler) {
         this.connectionRegistry = connectionRegistry;
         this.commandCenter = commandCenter;
         this.logger = logger;
+        this.loginManager = loginManager;
         this.handshakeCallback = handshakeCallback;
         this.loginHelloHandler = loginHelloHandler;
         this.loginKeyHandler = loginKeyHandler;
@@ -98,8 +103,22 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
                     handleLoginKey(ctx, key);
                 }
             }
+            case CONFIGURATION -> handleConfigurationPacket(ctx, packet);
             case PLAY -> handlePlayPacket(ctx, packet);
             default -> throw new IllegalStateException("Unknown connection state: " + state);
+        }
+    }
+
+    private void handleConfigurationPacket(ChannelHandlerContext ctx, Packet<?> packet) {
+        if (packet instanceof FinishConfigurationC2S) {
+            logger.log("Client finished configuration");
+            if (loginManager != null) {
+                loginManager.onConfigurationFinish(ctx);
+            }
+        } else if (packet instanceof PingConfigurationC2S ping) {
+            logger.log("Configuration ping: id=%d".formatted(ping.id()));
+        } else {
+            logger.log("Unhandled configuration packet: %s".formatted(packet.getClass().getSimpleName()));
         }
     }
 
@@ -116,7 +135,6 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
         } else if (packet instanceof MovePlayerRotC2S rot) {
             logger.log("Rot: yaw=%.1f pitch=%.1f".formatted(rot.yaw(), rot.pitch()));
         } else if (packet instanceof MovePlayerStatusOnlyC2S status) {
-            // onGround only, no-op
         } else if (packet instanceof ChatCommandC2S cmd) {
             logger.log("Command: /%s".formatted(cmd.command()));
         } else if (packet instanceof ChatMessageC2S msg) {
@@ -164,14 +182,18 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
 
     private void handleLoginHello(ChannelHandlerContext ctx, LoginHelloC2S hello) {
         logger.log("Login hello from %s (profile %s)".formatted(hello.name(), hello.profileId()));
-        if (loginHelloHandler != null) {
+        if (loginManager != null) {
+            loginManager.onLoginHello(ctx, hello);
+        } else if (loginHelloHandler != null) {
             loginHelloHandler.accept(ctx, hello);
         }
     }
 
     private void handleLoginKey(ChannelHandlerContext ctx, LoginKeyC2S key) {
         logger.log("Login key received");
-        if (loginKeyHandler != null) {
+        if (loginManager != null) {
+            loginManager.onLoginKey(ctx, key);
+        } else if (loginKeyHandler != null) {
             loginKeyHandler.accept(ctx, key);
         }
     }
