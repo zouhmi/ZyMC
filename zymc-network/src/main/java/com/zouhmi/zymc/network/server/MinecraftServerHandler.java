@@ -7,8 +7,7 @@ import com.zouhmi.zymc.network.protocol.Packet;
 import com.zouhmi.zymc.network.protocol.handshake.HandshakeC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginHelloC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
-import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
-import com.zouhmi.zymc.network.protocol.play.GameJoinS2C;
+import com.zouhmi.zymc.network.protocol.play.AcceptTeleportationC2S;
 import com.zouhmi.zymc.network.protocol.play.KeepAliveC2S;
 import com.zouhmi.zymc.network.protocol.play.PlayerPositionAndLookC2S;
 import com.zouhmi.zymc.network.protocol.status.StatusRequestC2S;
@@ -22,6 +21,7 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     private final ConnectionRegistry connectionRegistry;
     private final ServerCommandCenter commandCenter;
     private final Logger logger;
+    private final KeepAliveManager keepAliveManager;
     private java.util.function.Consumer<HandshakeC2S> handshakeCallback;
     private java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler;
     private java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler;
@@ -40,6 +40,7 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
         this.handshakeCallback = handshakeCallback;
         this.loginHelloHandler = loginHelloHandler;
         this.loginKeyHandler = loginKeyHandler;
+        this.keepAliveManager = new KeepAliveManager();
     }
 
     public void setLoginHelloHandler(java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> handler) {
@@ -48,6 +49,19 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
 
     public void setLoginKeyHandler(java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> handler) {
         this.loginKeyHandler = handler;
+    }
+
+    @Override
+    public void channelActive(ChannelHandlerContext ctx) throws Exception {
+        logger.log("Client connected: %s".formatted(ctx.channel().remoteAddress()));
+        super.channelActive(ctx);
+    }
+
+    @Override
+    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+        logger.log("Client disconnected: %s".formatted(ctx.channel().remoteAddress()));
+        keepAliveManager.stop(ctx.channel());
+        super.channelInactive(ctx);
     }
 
     @Override
@@ -73,9 +87,11 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
             }
             case PLAY -> {
                 if (packet instanceof KeepAliveC2S keepAlive) {
-                    logger.log("Keep-alive response: %d".formatted(keepAlive.id()));
+                    keepAliveManager.handleResponse(ctx.channel(), keepAlive.id());
                 } else if (packet instanceof PlayerPositionAndLookC2S pos) {
-                    logger.log("Player position update: x=%.2f y=%.2f z=%.2f".formatted(pos.x(), pos.y(), pos.z()));
+                    logger.log("Player position: x=%.2f y=%.2f z=%.2f".formatted(pos.x(), pos.y(), pos.z()));
+                } else if (packet instanceof AcceptTeleportationC2S teleport) {
+                    logger.log("Teleport confirmed: id=%d".formatted(teleport.teleportId()));
                 } else {
                     logger.log("Unhandled play packet: %s".formatted(packet.getClass().getSimpleName()));
                 }
@@ -92,12 +108,12 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
 
         switch (handshake.intendedState()) {
             case STATUS -> {
-                logger.log("Handshake from %s:%d — intended: STATUS".formatted(
+                logger.log("Handshake from %s:%d - intended: STATUS".formatted(
                         handshake.address(), handshake.port()));
                 setState(ConnectionState.STATUS);
             }
             case LOGIN -> {
-                logger.log("Handshake from %s:%d — intended: LOGIN".formatted(
+                logger.log("Handshake from %s:%d - intended: LOGIN".formatted(
                         handshake.address(), handshake.port()));
                 setState(ConnectionState.LOGIN);
             }
@@ -144,6 +160,10 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
 
     public ConnectionState getState() {
         return connectionRegistry.currentState();
+    }
+
+    public KeepAliveManager getKeepAliveManager() {
+        return keepAliveManager;
     }
 
     void onChannelConnected(Channel channel) {

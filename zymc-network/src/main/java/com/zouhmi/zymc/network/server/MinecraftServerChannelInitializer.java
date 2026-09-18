@@ -14,6 +14,8 @@ import com.zouhmi.zymc.network.protocol.login.LoginKeyC2S;
 import com.zouhmi.zymc.network.protocol.login.LoginKeyC2SCodec;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2C;
 import com.zouhmi.zymc.network.protocol.login.LoginSuccessS2CCodec;
+import com.zouhmi.zymc.network.protocol.play.AcceptTeleportationC2S;
+import com.zouhmi.zymc.network.protocol.play.AcceptTeleportationC2SCodec;
 import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2C;
 import com.zouhmi.zymc.network.protocol.play.ChunkDataAndUpdateLightS2CCodec;
 import com.zouhmi.zymc.network.protocol.play.GameEventS2C;
@@ -115,6 +117,7 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
         connectionRegistry.addEncoder(ConnectionState.PLAY, PlayerInfoUpdateS2C.class, new PlayerInfoUpdateS2CCodec(), 0x44);
         connectionRegistry.addEncoder(ConnectionState.PLAY, SynchronizePlayerPositionS2C.class, new SynchronizePlayerPositionS2CCodec(), 0x46);
         connectionRegistry.register(ConnectionState.PLAY, 0x1B, KeepAliveC2S.class, new KeepAliveC2SCodec());
-        connectionRegistry.register(ConnectionState.PLAY, 0x0, PlayerPositionAndLookC2S.class, new PlayerPositionAndLookC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x0, AcceptTeleportationC2S.class, new AcceptTeleportationC2SCodec());
+        connectionRegistry.register(ConnectionState.PLAY, 0x1E, PlayerPositionAndLookC2S.class, new PlayerPositionAndLookC2SCodec());
     }
 }

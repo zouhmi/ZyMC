@@ -4,6 +4,7 @@ import com.zouhmi.zymc.network.protocol.ConnectionRegistry;
 import com.zouhmi.zymc.network.server.LoginManager;
 import com.zouhmi.zymc.network.server.MinecraftServerChannelInitializer;
 import com.zouhmi.zymc.network.server.MinecraftServerHandler;
+import com.zouhmi.zymc.world.FlatWorldGenerator;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -16,22 +17,22 @@ public final class ZyMCServer {
         System.out.println("Starting Minecraft server for 1.21.11...");
 
         ConnectionRegistry connectionRegistry = new ConnectionRegistry();
+        FlatWorldGenerator worldGenerator = new FlatWorldGenerator();
+        MinecraftServerHandler.Logger logger = System.out::println;
 
-        MinecraftServerHandler handler = new MinecraftServerHandler(
-                connectionRegistry,
-                null,
-                System.out::println,
-                null,
-                null,
-                null);
-
-        LoginManager loginManager = new LoginManager(connectionRegistry, handler);
-
-        handler.setLoginHelloHandler(loginManager::onLoginHello);
-        handler.setLoginKeyHandler(loginManager::onLoginKey);
+        LoginManager[] loginManagerRef = new LoginManager[1];
 
         MinecraftServerChannelInitializer initializer =
-                new MinecraftServerChannelInitializer(connectionRegistry, handler);
+                new MinecraftServerChannelInitializer(connectionRegistry, null, logger,
+                        null,
+                        (ctx, hello) -> loginManagerRef[0].onLoginHello(ctx, hello),
+                        (ctx, key) -> loginManagerRef[0].onLoginKey(ctx, key));
+
+        MinecraftServerHandler tempHandler = new MinecraftServerHandler(connectionRegistry, null, logger);
+        LoginManager loginManager = new LoginManager(connectionRegistry, tempHandler,
+                (x, z) -> worldGenerator.getChunk(x, z).toNetworkBytes());
+        loginManagerRef[0] = loginManager;
+
         initializer.registerHandshake();
         initializer.registerStatus();
         initializer.registerLogin();
