@@ -1,0 +1,25 @@
+# Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.class
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs / runtime
+logs/
+launch/
+*.log
+benchmark-results.log
+
+# JDK / build tool downloads (local only)
+jdk-*.tar.gz
+openjdk.tar.gz
+gradle*.zip
+gradle*.tar.gz
