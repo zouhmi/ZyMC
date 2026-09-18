@@ -67,4 +67,14 @@ public final class RSAEngine {
             throw new RuntimeException("Failed to decode RSA public key", e);
         }
     }
+
+    public byte[] encryptWithPublicKey(PublicKey key, byte[] data) {
+        try {
+            Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
+            cipher.init(Cipher.ENCRYPT_MODE, key);
+            return cipher.doFinal(data);
+        } catch (Exception e) {
+            throw new RuntimeException("RSA encryption failed", e);
+        }
+    }
 }

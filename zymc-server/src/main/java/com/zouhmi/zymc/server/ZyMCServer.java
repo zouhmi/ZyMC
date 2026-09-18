@@ -13,34 +13,34 @@ import io.netty.channel.socket.nio.NioServerSocketChannel;
 public final class ZyMCServer {
 
     public static void main(String[] args) throws InterruptedException {
-        boolean onlineMode = true;
-        int port = 25565;
+        final boolean[] onlineMode = {true};
+        final int[] port = {25565};
 
         for (int i = 0; i < args.length; i++) {
             switch (args[i]) {
-                case "--offline" -> onlineMode = false;
-                case "--port" -> port = Integer.parseInt(args[++i]);
+                case "--offline" -> onlineMode[0] = false;
+                case "--port" -> port[0] = Integer.parseInt(args[++i]);
             }
         }
 
         System.out.println("ZyMC 0.1.0-SNAPSHOT");
         System.out.println("Starting Minecraft server for 1.21.11...");
-        System.out.println("Online mode: " + onlineMode);
+        System.out.println("Online mode: " + onlineMode[0]);
 
         ConnectionRegistry connectionRegistry = new ConnectionRegistry();
-        FlatWorldGenerator worldGenerator = new FlatWorldGenerator();
         MinecraftServerHandler.Logger logger = System.out::println;
 
-        LoginManager loginManager = new LoginManager(connectionRegistry, null,
-                (x, z) -> worldGenerator.getChunk(x, z).toNetworkBytes(), onlineMode);
-        loginManager.setLogger(logger);
+        FlatWorldGenerator worldGen = new FlatWorldGenerator();
 
         MinecraftServerChannelInitializer initializer =
                 new MinecraftServerChannelInitializer(connectionRegistry, null, logger,
-                        loginManager,
-                        null,
-                        (ctx, hello) -> loginManager.onLoginHello(ctx, hello),
-                        (ctx, key) -> loginManager.onLoginKey(ctx, key));
+                        reg -> {
+                            LoginManager lm = new LoginManager(reg, null,
+                                    (x, z) -> worldGen.getChunk(x, z).toNetworkBytes(), onlineMode[0]);
+                            lm.setLogger(logger);
+                            return lm;
+                        },
+                        null, null, null);
 
         initializer.registerHandshake();
         initializer.registerStatus();
@@ -64,8 +64,8 @@ public final class ZyMCServer {
                 .channel(NioServerSocketChannel.class)
                 .childHandler(initializer);
 
-        bootstrap.bind("0.0.0.0", port).sync();
-        System.out.println("Listening on 0.0.0.0:" + port);
+        bootstrap.bind("0.0.0.0", port[0]).sync();
+        System.out.println("Listening on 0.0.0.0:" + port[0]);
 
         Thread.currentThread().join();
     }

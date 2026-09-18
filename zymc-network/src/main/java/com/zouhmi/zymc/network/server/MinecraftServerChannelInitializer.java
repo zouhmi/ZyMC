@@ -94,13 +94,14 @@ import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 public final class MinecraftServerChannelInitializer extends ChannelInitializer<Channel> {
 
     private final ConnectionRegistry connectionRegistry;
     private final MinecraftServerHandler.ServerCommandCenter commandCenter;
     private final MinecraftServerHandler.Logger logger;
-    private final LoginManager loginManager;
+    private final Function<ConnectionRegistry, LoginManager> loginManagerFactory;
     private final Consumer<HandshakeC2S> handshakeCallback;
     private final BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler;
     private final BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler;
@@ -108,14 +109,14 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
     public MinecraftServerChannelInitializer(ConnectionRegistry connectionRegistry,
                                               MinecraftServerHandler.ServerCommandCenter commandCenter,
                                               MinecraftServerHandler.Logger logger,
-                                              LoginManager loginManager,
+                                              Function<ConnectionRegistry, LoginManager> loginManagerFactory,
                                               Consumer<HandshakeC2S> handshakeCallback,
                                               BiConsumer<ChannelHandlerContext, LoginHelloC2S> loginHelloHandler,
                                               BiConsumer<ChannelHandlerContext, LoginKeyC2S> loginKeyHandler) {
         this.connectionRegistry = connectionRegistry;
         this.commandCenter = commandCenter;
         this.logger = logger;
-        this.loginManager = loginManager;
+        this.loginManagerFactory = loginManagerFactory;
         this.handshakeCallback = handshakeCallback;
         this.loginHelloHandler = loginHelloHandler;
         this.loginKeyHandler = loginKeyHandler;
@@ -127,15 +128,22 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
 
     @Override
     protected void initChannel(Channel ch) {
+        LoginManager perConnectionLoginManager = loginManagerFactory != null
+                ? loginManagerFactory.apply(connectionRegistry) : null;
+
         MinecraftServerHandler handler = new MinecraftServerHandler(
                 connectionRegistry, commandCenter, logger,
-                loginManager, handshakeCallback, loginHelloHandler, loginKeyHandler);
+                perConnectionLoginManager, handshakeCallback, loginHelloHandler, loginKeyHandler);
 
         ChannelPipeline pipeline = ch.pipeline();
         pipeline.addLast(new LoggingHandler(LogLevel.DEBUG));
         pipeline.addLast("packet-decoder", new NettyPacketDecoder(connectionRegistry));
         pipeline.addLast(handler);
         pipeline.addLast("packet-encoder", new NettyPacketEncoder(connectionRegistry));
+
+        if (perConnectionLoginManager != null) {
+            perConnectionLoginManager.setHandler(handler);
+        }
 
         handler.onChannelConnected(ch);
     }
@@ -168,7 +176,6 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
     }
 
     public void registerPlay() {
-        // S2C packets
         connectionRegistry.addEncoder(ConnectionState.PLAY, GameJoinS2C.class, new GameJoinS2CCodec(), 0x30);
         connectionRegistry.addEncoder(ConnectionState.PLAY, KeepAliveS2C.class, new KeepAliveS2CCodec(), 0x2B);
         connectionRegistry.addEncoder(ConnectionState.PLAY, ChunkDataAndUpdateLightS2C.class, new ChunkDataAndUpdateLightS2CCodec(), 0x2C);
@@ -184,7 +191,6 @@ public final class MinecraftServerChannelInitializer extends ChannelInitializer<
         connectionRegistry.addEncoder(ConnectionState.PLAY, SetSimulationDistanceS2C.class, new SetSimulationDistanceS2CCodec(), 0x6D);
         connectionRegistry.addEncoder(ConnectionState.PLAY, SetTimeS2C.class, new SetTimeS2CCodec(), 0x6F);
         connectionRegistry.addEncoder(ConnectionState.PLAY, PlayerRotationS2C.class, new PlayerRotationS2CCodec(), 0x47);
-        // C2S packets
         connectionRegistry.register(ConnectionState.PLAY, 0x1B, KeepAliveC2S.class, new KeepAliveC2SCodec());
         connectionRegistry.register(ConnectionState.PLAY, 0x0, AcceptTeleportationC2S.class, new AcceptTeleportationC2SCodec());
         connectionRegistry.register(ConnectionState.PLAY, 0x1E, MovePlayerPosRotC2S.class, new MovePlayerPosRotC2SCodec());
