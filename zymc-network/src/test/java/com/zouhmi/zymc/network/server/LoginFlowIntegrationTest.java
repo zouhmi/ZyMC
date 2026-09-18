@@ -29,6 +29,8 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.util.UUID;
@@ -38,7 +40,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import javax.crypto.Cipher;
-import javax.crypto.spec.SecretKeySpec;
 import java.security.KeyFactory;
 import java.security.spec.X509EncodedKeySpec;
 import static org.junit.jupiter.api.Assertions.*;
@@ -126,48 +127,47 @@ final class LoginFlowIntegrationTest {
 
     @Test
     void loginFlowCompletes() throws Exception {
-        sendHandshake(25565, HandshakeC2S.ConnectionIntent.LOGIN);
-        awaitState(ConnectionState.LOGIN, 200);
-        assertEquals(ConnectionState.LOGIN, connectionRegistry.currentState());
+        try (Socket sock = new Socket("127.0.0.1", port)) {
+            OutputStream out = sock.getOutputStream();
+            InputStream in = sock.getInputStream();
 
-        UUID playerUuid = UUID.randomUUID();
-        LoginHelloC2S loginHello = new LoginHelloC2S("TestPlayer", playerUuid);
-        sendPacket(loginHello, 0x00);
+            HandshakeC2S handshake = new HandshakeC2S(
+                    ZMCVersion.PROTOCOL_VERSION, "127.0.0.1", port,
+                    HandshakeC2S.ConnectionIntent.LOGIN);
+            sendRaw(out, handshake, 0x00);
+            Thread.sleep(50);
 
-        Thread.sleep(100);
+            UUID playerUuid = UUID.randomUUID();
+            LoginHelloC2S loginHello = new LoginHelloC2S("TestPlayer", playerUuid);
+            sendRaw(out, loginHello, 0x00);
+            Thread.sleep(100);
 
-        LoginHelloS2C serverHello = receivedLoginHello.get();
-        assertNotNull(serverHello, "Server should send LoginHelloS2C");
-        assertNotNull(serverHello.publicKeyDer());
-        assertTrue(serverHello.publicKeyDer().length > 0);
-        assertNotNull(serverHello.nonce());
-        assertEquals(4, serverHello.nonce().length);
+            LoginHelloS2C serverHello = receivedLoginHello.get();
+            assertNotNull(serverHello, "Server should send LoginHelloS2C");
+            assertNotNull(serverHello.publicKeyDer());
+            assertTrue(serverHello.publicKeyDer().length > 0);
+            assertNotNull(serverHello.nonce());
+            assertEquals(4, serverHello.nonce().length);
 
-        byte[] sharedSecret = new byte[16];
-        ThreadLocalRandom.current().nextBytes(sharedSecret);
-        byte[] encryptedSecret = encryptWithPublicKey(serverHello.publicKeyDer(), sharedSecret);
-        byte[] encryptedNonce = encryptWithPublicKey(serverHello.publicKeyDer(), serverHello.nonce());
+            byte[] sharedSecret = new byte[16];
+            ThreadLocalRandom.current().nextBytes(sharedSecret);
+            byte[] encryptedSecret = encryptWithPublicKey(serverHello.publicKeyDer(), sharedSecret);
+            byte[] encryptedNonce = encryptWithPublicKey(serverHello.publicKeyDer(), serverHello.nonce());
 
-        LoginKeyC2S loginKey = new LoginKeyC2S(encryptedSecret, encryptedNonce);
-        sendPacket(loginKey, 0x01);
+            LoginKeyC2S loginKey = new LoginKeyC2S(encryptedSecret, encryptedNonce);
+            sendRaw(out, loginKey, 0x01);
+            Thread.sleep(300);
 
-        Thread.sleep(300);
-
-        assertNotNull(receivedLoginSuccess.get(), "Server should send LoginSuccess");
-        assertEquals("TestPlayer", receivedLoginSuccess.get().name());
-        assertEquals(playerUuid, receivedLoginSuccess.get().profileId());
+            assertNotNull(receivedLoginSuccess.get(), "Server should send LoginSuccess");
+            assertEquals("TestPlayer", receivedLoginSuccess.get().name());
+            assertEquals(playerUuid, receivedLoginSuccess.get().profileId());
+        }
     }
 
-    private void sendHandshake(int serverPort, HandshakeC2S.ConnectionIntent intent) throws Exception {
-        sendPacket(new HandshakeC2S(ZMCVersion.PROTOCOL_VERSION, "127.0.0.1", serverPort, intent), 0x00);
-    }
-
-    private void sendPacket(Object packet, int packetId) throws Exception {
+    private void sendRaw(OutputStream out, Object packet, int packetId) throws Exception {
         PacketRegistry registry = new PacketRegistry();
         if (packet instanceof HandshakeC2S) {
             registry.register(0x00, HandshakeC2S.class, new HandshakeC2SCodec());
-        } else if (packet instanceof StatusRequestC2S) {
-            registry.register(0x00, StatusRequestC2S.class, new StatusRequestC2SCodec());
         } else if (packet instanceof LoginHelloC2S) {
             registry.register(0x00, LoginHelloC2S.class, new LoginHelloC2SCodec());
         } else if (packet instanceof LoginKeyC2S) {
@@ -177,30 +177,28 @@ final class LoginFlowIntegrationTest {
         }
 
         ByteBuf body = ByteBufAllocator.DEFAULT.buffer();
-        registry.encode((com.zouhmi.zymc.network.protocol.Packet<?>) packet, body);
-        int bodyLength = body.readableBytes();
-        int idLength = varIntSize(packetId);
+        try {
+            registry.encode((com.zouhmi.zymc.network.protocol.Packet<?>) packet, body);
+            int bodyLength = body.readableBytes();
+            int idLength = varIntSize(packetId);
 
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        writeVarInt(out, bodyLength + idLength);
-        writeVarInt(out, packetId);
-        byte[] bodyBytes = new byte[bodyLength];
-        body.readBytes(bodyBytes);
-        out.write(bodyBytes);
-        body.release();
-        byte[] framed = out.toByteArray();
-
-        try (Socket sock = new Socket("127.0.0.1", port)) {
-            sock.getOutputStream().write(framed);
-            sock.getOutputStream().flush();
-            Thread.sleep(30);
+            ByteArrayOutputStream buf = new ByteArrayOutputStream();
+            writeVarInt(buf, bodyLength + idLength);
+            writeVarInt(buf, packetId);
+            byte[] bodyBytes = new byte[bodyLength];
+            body.readBytes(bodyBytes);
+            buf.write(bodyBytes);
+            out.write(buf.toByteArray());
+            out.flush();
+        } finally {
+            body.release();
         }
     }
 
     private byte[] encryptWithPublicKey(byte[] publicKeyDer, byte[] data) {
         try {
-            java.security.KeyFactory kf = java.security.KeyFactory.getInstance("RSA");
-            java.security.PublicKey publicKey = kf.generatePublic(new X509EncodedKeySpec(publicKeyDer));
+            java.security.PublicKey publicKey = KeyFactory.getInstance("RSA")
+                    .generatePublic(new X509EncodedKeySpec(publicKeyDer));
             Cipher cipher = Cipher.getInstance("RSA/ECB/PKCS1Padding");
             cipher.init(Cipher.ENCRYPT_MODE, publicKey);
             return cipher.doFinal(data);
@@ -227,13 +225,5 @@ final class LoginFlowIntegrationTest {
             if (value != 0) part |= 0x80;
             out.write(part);
         } while (value != 0);
-    }
-
-    private void awaitState(ConnectionState expected, long timeoutMs) throws InterruptedException {
-        long deadline = System.currentTimeMillis() + timeoutMs;
-        while (System.currentTimeMillis() < deadline) {
-            if (connectionRegistry.currentState() == expected) return;
-            Thread.sleep(10);
-        }
     }
 }

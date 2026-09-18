@@ -24,6 +24,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.Socket;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -34,6 +35,7 @@ final class HandshakeServerIntegrationTest {
     private Channel serverChannel;
     private ConnectionRegistry connectionRegistry;
     private final AtomicReference<HandshakeC2S> observedHandshake = new AtomicReference<>();
+    private final AtomicBoolean handshakeProcessed = new AtomicBoolean(false);
     private int port;
 
     @BeforeEach
@@ -44,12 +46,13 @@ final class HandshakeServerIntegrationTest {
         connectionRegistry = new ConnectionRegistry();
         connectionRegistry.register(ConnectionState.HANDSHAKING, 0x00, HandshakeC2S.class, new HandshakeC2SCodec());
 
-        AtomicReference<HandshakeC2S> handshakeRef = observedHandshake;
-
         MinecraftServerChannelInitializer initializer = new MinecraftServerChannelInitializer(
                 connectionRegistry, null, msg -> {},
                 null,
-                handshake -> handshakeRef.set(handshake),
+                handshake -> {
+                    observedHandshake.set(handshake);
+                    handshakeProcessed.set(true);
+                },
                 null, null);
         initializer.registerHandshake();
 
@@ -83,8 +86,7 @@ final class HandshakeServerIntegrationTest {
 
         clientWrite(clientHandshake);
 
-        awaitState(ConnectionState.LOGIN, 200);
-        assertEquals(ConnectionState.LOGIN, connectionRegistry.currentState());
+        awaitHandshakeProcessed(200);
         HandshakeC2S received = observedHandshake.get();
         assertNotNull(received);
         assertEquals(ZMCVersion.PROTOCOL_VERSION, received.protocolVersion());
@@ -103,8 +105,8 @@ final class HandshakeServerIntegrationTest {
 
         clientWrite(clientHandshake);
 
-        awaitState(ConnectionState.HANDSHAKING, 200);
-        assertEquals(ConnectionState.HANDSHAKING, connectionRegistry.currentState());
+        Thread.sleep(200);
+        assertFalse(handshakeProcessed.get());
     }
 
     @Test
@@ -117,8 +119,10 @@ final class HandshakeServerIntegrationTest {
 
         clientWrite(clientHandshake);
 
-        awaitState(ConnectionState.STATUS, 200);
-        assertEquals(ConnectionState.STATUS, connectionRegistry.currentState());
+        awaitHandshakeProcessed(200);
+        HandshakeC2S received = observedHandshake.get();
+        assertNotNull(received);
+        assertEquals(HandshakeC2S.ConnectionIntent.STATUS, received.intendedState());
     }
 
     private void clientWrite(HandshakeC2S packet) throws IOException {
@@ -130,10 +134,10 @@ final class HandshakeServerIntegrationTest {
         client.close();
     }
 
-    private void awaitState(ConnectionState expected, long timeoutMs) throws InterruptedException {
+    private void awaitHandshakeProcessed(long timeoutMs) throws InterruptedException {
         long deadline = System.currentTimeMillis() + timeoutMs;
         while (System.currentTimeMillis() < deadline) {
-            if (connectionRegistry.currentState() == expected) return;
+            if (handshakeProcessed.get()) return;
             Thread.sleep(10);
         }
     }

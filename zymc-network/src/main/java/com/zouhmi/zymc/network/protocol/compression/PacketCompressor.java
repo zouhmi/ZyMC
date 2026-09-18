@@ -21,7 +21,9 @@ public final class PacketCompressor extends MessageToByteEncoder<Packet<?>> {
 
     @Override
     protected void encode(ChannelHandlerContext ctx, Packet<?> packet, ByteBuf out) throws Exception {
-        PacketRegistry registry = connectionRegistry.currentRegistry();
+        com.zouhmi.zymc.network.protocol.ConnectionState cs = ctx.channel().attr(com.zouhmi.zymc.network.protocol.ConnectionRegistry.STATE_KEY).get();
+        if (cs == null) cs = com.zouhmi.zymc.network.protocol.ConnectionState.HANDSHAKING;
+        PacketRegistry registry = connectionRegistry.registryFor(cs);
         ByteBuf buf = ctx.alloc().buffer();
         try {
             registry.encode(packet, buf);

@@ -14,7 +14,9 @@ public final class NettyPacketEncoder extends MessageToByteEncoder<Packet<?>> {
 
     @Override
     protected void encode(ChannelHandlerContext ctx, Packet<?> packet, ByteBuf out) throws Exception {
-        PacketRegistry registry = connectionRegistry.currentRegistry();
+        ConnectionState currentState = ctx.channel().attr(ConnectionRegistry.STATE_KEY).get();
+        if (currentState == null) currentState = ConnectionState.HANDSHAKING;
+        PacketRegistry registry = connectionRegistry.registryFor(currentState);
         ByteBuf buf = ctx.alloc().buffer();
         try {
             registry.encode(packet, buf);

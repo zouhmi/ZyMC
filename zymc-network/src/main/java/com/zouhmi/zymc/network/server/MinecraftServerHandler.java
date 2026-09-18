@@ -55,36 +55,25 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
         this.keepAliveManager = new KeepAliveManager();
     }
 
-    public void setLoginHelloHandler(java.util.function.BiConsumer<ChannelHandlerContext, LoginHelloC2S> handler) {
-        this.loginHelloHandler = handler;
-    }
-
-    public void setLoginKeyHandler(java.util.function.BiConsumer<ChannelHandlerContext, LoginKeyC2S> handler) {
-        this.loginKeyHandler = handler;
-    }
-
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
-        logger.log("Client connected: %s".formatted(ctx.channel().remoteAddress()));
+        ctx.channel().attr(ConnectionRegistry.STATE_KEY).set(ConnectionState.HANDSHAKING);
         super.channelActive(ctx);
     }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
-        logger.log("Client disconnected: %s".formatted(ctx.channel().remoteAddress()));
-        keepAliveManager.stop(ctx.channel());
         super.channelInactive(ctx);
     }
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        logger.log("Exception from %s: %s".formatted(ctx.channel().remoteAddress(), cause.getMessage()));
         ctx.close();
     }
 
     @Override
     public void channelRead0(ChannelHandlerContext ctx, Packet<?> packet) throws Exception {
-        ConnectionState state = connectionRegistry.currentState();
+        ConnectionState state = getState(ctx);
         switch (state) {
             case HANDSHAKING -> {
                 if (packet instanceof HandshakeC2S handshake) {
@@ -111,60 +100,36 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
 
     private void handleConfigurationPacket(ChannelHandlerContext ctx, Packet<?> packet) {
         if (packet instanceof FinishConfigurationC2S) {
-            logger.log("Client finished configuration");
             if (loginManager != null) {
                 loginManager.onConfigurationFinish(ctx);
             }
-        } else if (packet instanceof PingConfigurationC2S ping) {
-            logger.log("Configuration ping: id=%d".formatted(ping.id()));
-        } else {
-            logger.log("Unhandled configuration packet: %s".formatted(packet.getClass().getSimpleName()));
         }
     }
 
     private void handlePlayPacket(ChannelHandlerContext ctx, Packet<?> packet) {
         if (packet instanceof KeepAliveC2S keepAlive) {
             keepAliveManager.handleResponse(ctx.channel(), keepAlive.id());
-        } else if (packet instanceof AcceptTeleportationC2S teleport) {
-            logger.log("Teleport confirmed: id=%d".formatted(teleport.teleportId()));
-        } else if (packet instanceof MovePlayerPosC2S pos) {
-            logger.log("Move: x=%.2f y=%.2f z=%.2f".formatted(pos.x(), pos.y(), pos.z()));
-        } else if (packet instanceof MovePlayerPosRotC2S pos) {
-            logger.log("Move+Rot: x=%.2f y=%.2f z=%.2f yaw=%.1f pitch=%.1f"
-                    .formatted(pos.x(), pos.y(), pos.z(), pos.yaw(), pos.pitch()));
-        } else if (packet instanceof MovePlayerRotC2S rot) {
-            logger.log("Rot: yaw=%.1f pitch=%.1f".formatted(rot.yaw(), rot.pitch()));
-        } else if (packet instanceof MovePlayerStatusOnlyC2S status) {
-        } else if (packet instanceof ChatCommandC2S cmd) {
-            logger.log("Command: /%s".formatted(cmd.command()));
-        } else if (packet instanceof ChatMessageC2S msg) {
-            logger.log("Chat: %s".formatted(msg.message()));
-        } else if (packet instanceof ClientCommandC2S clientCmd) {
-            logger.log("Client command: action=%d".formatted(clientCmd.actionId()));
-        } else if (packet instanceof ClientInformationC2S info) {
-            logger.log("Client info: locale=%s viewDist=%d".formatted(info.locale(), info.viewDistance()));
-        } else {
-            logger.log("Unhandled play packet: %s".formatted(packet.getClass().getSimpleName()));
+        } else if (packet instanceof AcceptTeleportationC2S) {
+        } else if (packet instanceof MovePlayerPosC2S) {
+        } else if (packet instanceof MovePlayerPosRotC2S) {
+        } else if (packet instanceof MovePlayerRotC2S) {
+        } else if (packet instanceof MovePlayerStatusOnlyC2S) {
+        } else if (packet instanceof ChatCommandC2S) {
+        } else if (packet instanceof ChatMessageC2S) {
+        } else if (packet instanceof ClientCommandC2S) {
+        } else if (packet instanceof ClientInformationC2S) {
         }
     }
 
     protected void handleHandshake(ChannelHandlerContext ctx, HandshakeC2S handshake) {
         if (handshake.protocolVersion() != ZMCVersion.PROTOCOL_VERSION) {
-            disconnect(ctx, "Outdated server");
+            ctx.close();
             return;
         }
 
         switch (handshake.intendedState()) {
-            case STATUS -> {
-                logger.log("Handshake from %s:%d - intended: STATUS".formatted(
-                        handshake.address(), handshake.port()));
-                setState(ConnectionState.STATUS);
-            }
-            case LOGIN -> {
-                logger.log("Handshake from %s:%d - intended: LOGIN".formatted(
-                        handshake.address(), handshake.port()));
-                setState(ConnectionState.LOGIN);
-            }
+            case STATUS -> setState(ctx, ConnectionState.STATUS);
+            case LOGIN -> setState(ctx, ConnectionState.LOGIN);
         }
 
         if (handshakeCallback != null) {
@@ -173,7 +138,6 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     }
 
     private void handleStatusRequest(ChannelHandlerContext ctx) {
-        logger.log("Status request from %s".formatted(ctx.channel().remoteAddress()));
         String json = "{\"version\":{\"name\":\"%s\",\"protocol\":%d},"
                 + "\"players\":{\"max\":%d,\"online\":0},\"description\":{\"text\":\"%s\"}}"
                 .formatted(ZMCVersion.MC_TARGET, ZMCVersion.PROTOCOL_VERSION, 20, "ZyMC");
@@ -181,7 +145,6 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     }
 
     private void handleLoginHello(ChannelHandlerContext ctx, LoginHelloC2S hello) {
-        logger.log("Login hello from %s (profile %s)".formatted(hello.name(), hello.profileId()));
         if (loginManager != null) {
             loginManager.onLoginHello(ctx, hello);
         } else if (loginHelloHandler != null) {
@@ -190,7 +153,6 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
     }
 
     private void handleLoginKey(ChannelHandlerContext ctx, LoginKeyC2S key) {
-        logger.log("Login key received");
         if (loginManager != null) {
             loginManager.onLoginKey(ctx, key);
         } else if (loginKeyHandler != null) {
@@ -198,20 +160,13 @@ public final class MinecraftServerHandler extends SimpleChannelInboundHandler<Pa
         }
     }
 
-    private void disconnect(ChannelHandlerContext ctx, String reason) {
-        ctx.close().addListener(future -> {
-            if (!future.isSuccess()) {
-                logger.log("Failed to close channel: %s".formatted(future.cause()));
-            }
-        });
+    void setState(ChannelHandlerContext ctx, ConnectionState state) {
+        ctx.channel().attr(ConnectionRegistry.STATE_KEY).set(state);
     }
 
-    void setState(ConnectionState state) {
-        connectionRegistry.setState(state);
-    }
-
-    public ConnectionState getState() {
-        return connectionRegistry.currentState();
+    public ConnectionState getState(ChannelHandlerContext ctx) {
+        ConnectionState s = ctx.channel().attr(ConnectionRegistry.STATE_KEY).get();
+        return s != null ? s : ConnectionState.HANDSHAKING;
     }
 
     public KeepAliveManager getKeepAliveManager() {

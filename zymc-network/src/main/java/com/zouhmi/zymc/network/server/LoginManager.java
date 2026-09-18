@@ -109,7 +109,7 @@ public final class LoginManager {
             ctx.writeAndFlush(success).addListener(future -> {
                 if (future.isSuccess()) {
                     enableEncryption(ctx);
-                    handler.setState(ConnectionState.CONFIGURATION);
+                    handler.setState(ctx, ConnectionState.CONFIGURATION);
                     sendConfiguration(ctx);
                 } else {
                     ctx.close();
@@ -125,7 +125,7 @@ public final class LoginManager {
         if (configurationSent) return;
         configurationSent = true;
 
-        handler.setState(ConnectionState.PLAY);
+        handler.setState(ctx, ConnectionState.PLAY);
         sendGameJoin(ctx);
         sendPlaySetupPackets(ctx);
         sendChunks(ctx);

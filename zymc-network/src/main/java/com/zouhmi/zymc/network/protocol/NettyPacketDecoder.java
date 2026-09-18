@@ -37,7 +37,6 @@ public final class NettyPacketDecoder extends ByteToMessageDecoder {
             case ID -> {
                 if (!in.isReadable()) return;
                 packetId = ByteBufVarInts.readVarInt(in);
-                // packetLength includes the ID and body; subtract the ID bytes already consumed.
                 int idBytesConsumed = ByteBufVarInts.varIntSize(packetId);
                 bodyLength = packetLength - idBytesConsumed;
                 if (bodyLength < 0) {
@@ -49,7 +48,10 @@ public final class NettyPacketDecoder extends ByteToMessageDecoder {
                 if (in.readableBytes() < bodyLength) return;
                 ByteBuf body = in.readBytes(bodyLength);
                 try {
-                    Packet<?> packet = connectionRegistry.currentRegistry().decode(packetId, body);
+                    ConnectionState currentState = ctx.channel().attr(ConnectionRegistry.STATE_KEY).get();
+                    if (currentState == null) currentState = ConnectionState.HANDSHAKING;
+                    PacketRegistry registry = connectionRegistry.registryFor(currentState);
+                    Packet<?> packet = registry.decode(packetId, body);
                     out.add(packet);
                 } finally {
                     body.release();

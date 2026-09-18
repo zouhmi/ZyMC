@@ -50,13 +50,14 @@ public final class BenchmarkClientHandler extends SimpleChannelInboundHandler<Pa
     @Override
     public void channelActive(ChannelHandlerContext ctx) throws Exception {
         metrics.setConnectStartTime(System.currentTimeMillis());
+        ctx.channel().attr(ConnectionRegistry.STATE_KEY).set(ConnectionState.HANDSHAKING);
 
         HandshakeC2S handshake = new HandshakeC2S(
                 ZMCVersion.PROTOCOL_VERSION, "localhost", 25565,
                 HandshakeC2S.ConnectionIntent.LOGIN);
         ctx.writeAndFlush(handshake);
 
-        connectionRegistry.setState(ConnectionState.LOGIN);
+        ctx.channel().attr(ConnectionRegistry.STATE_KEY).set(ConnectionState.LOGIN);
 
         LoginHelloC2S hello = new LoginHelloC2S(playerName, playerUuid);
         ctx.writeAndFlush(hello);
@@ -81,7 +82,8 @@ public final class BenchmarkClientHandler extends SimpleChannelInboundHandler<Pa
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, Packet<?> packet) throws Exception {
         metrics.recordPacketReceived(0);
-        ConnectionState state = connectionRegistry.currentState();
+        ConnectionState state = ctx.channel().attr(ConnectionRegistry.STATE_KEY).get();
+        if (state == null) state = ConnectionState.HANDSHAKING;
 
         switch (state) {
             case LOGIN -> handleLogin(ctx, packet);
@@ -112,7 +114,7 @@ public final class BenchmarkClientHandler extends SimpleChannelInboundHandler<Pa
         } else if (packet instanceof LoginSuccessS2C) {
             metrics.setLoginSuccessRecvTime(System.currentTimeMillis());
 
-            connectionRegistry.setState(ConnectionState.CONFIGURATION);
+            ctx.channel().attr(ConnectionRegistry.STATE_KEY).set(ConnectionState.CONFIGURATION);
             metrics.setConfigurationStartTime(System.currentTimeMillis());
 
             enableEncryption(ctx);
@@ -134,7 +136,7 @@ public final class BenchmarkClientHandler extends SimpleChannelInboundHandler<Pa
 
     private void handleConfiguration(ChannelHandlerContext ctx, Packet<?> packet) {
         if (packet instanceof FinishConfigurationS2C) {
-            connectionRegistry.setState(ConnectionState.PLAY);
+            ctx.channel().attr(ConnectionRegistry.STATE_KEY).set(ConnectionState.PLAY);
             FinishConfigurationC2S finish = new FinishConfigurationC2S();
             ctx.writeAndFlush(finish);
             metrics.setConfigurationFinishTime(System.currentTimeMillis());
